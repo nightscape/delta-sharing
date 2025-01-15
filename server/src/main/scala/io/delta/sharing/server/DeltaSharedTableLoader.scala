@@ -22,49 +22,32 @@ import com.google.common.cache.CacheBuilder
 import io.delta.standalone.internal.DeltaSharedTable
 
 import io.delta.sharing.kernel.internal.DeltaSharedTableKernel
+import io.delta.sharing.kernel.internal.IcebergSharedTableKernel
 import io.delta.sharing.server.config.{ServerConfig, TableConfig}
 
-
 /**
- * A class to load Delta tables from `TableConfig`. It also caches the loaded tables internally
- * to speed up the loading.
+ * A class to load Delta tables from `TableConfig`. It also caches the loaded
+ * tables internally to speed up the loading.
  */
 class DeltaSharedTableLoader(serverConfig: ServerConfig) {
   private val deltaSharedTableCache = {
-    CacheBuilder.newBuilder()
+    CacheBuilder
+      .newBuilder()
       .expireAfterAccess(60, TimeUnit.MINUTES)
       .maximumSize(serverConfig.deltaTableCacheSize)
-      .build[String, DeltaSharedTable]()
+      .build[String, DeltaSharedTableProtocol]()
   }
 
-  def loadTable(tableConfig: TableConfig, useKernel: Boolean = false): DeltaSharedTableProtocol = {
-    if (useKernel) {
-      return new DeltaSharedTableKernel(
-        tableConfig,
-        serverConfig.preSignedUrlTimeoutSeconds,
-        serverConfig.evaluatePredicateHints,
-        serverConfig.evaluateJsonPredicateHints,
-        serverConfig.evaluateJsonPredicateHintsV2,
-        serverConfig.queryTablePageSizeLimit,
-        serverConfig.queryTablePageTokenTtlMs,
-        serverConfig.refreshTokenTtlMs
-      )
-    }
+  def loadTable(
+      tableConfig: TableConfig,
+      useKernel: Boolean = false
+  ): DeltaSharedTableProtocol = {
     try {
       val deltaSharedTable =
         deltaSharedTableCache.get(
           tableConfig.location,
           () => {
-            new DeltaSharedTable(
-              tableConfig,
-              serverConfig.preSignedUrlTimeoutSeconds,
-              serverConfig.evaluatePredicateHints,
-              serverConfig.evaluateJsonPredicateHints,
-              serverConfig.evaluateJsonPredicateHintsV2,
-              serverConfig.queryTablePageSizeLimit,
-              serverConfig.queryTablePageTokenTtlMs,
-              serverConfig.refreshTokenTtlMs
-            )
+            createSharedTable(tableConfig, useKernel)
           }
         )
       if (!serverConfig.stalenessAcceptable) {
@@ -74,6 +57,51 @@ class DeltaSharedTableLoader(serverConfig: ServerConfig) {
     } catch {
       case CausedBy(e: DeltaSharingUnsupportedOperationException) => throw e
       case e: Throwable => throw e
+    }
+  }
+
+  private def createSharedTable(
+      tableConfig: TableConfig,
+      useKernel: Boolean
+  ): DeltaSharedTableProtocol = {
+    if (useKernel) {
+      // Check table format and create appropriate implementation
+      val format = serverConfig.defaultFormat
+      format match {
+        case "iceberg" =>
+          new IcebergSharedTableKernel(
+            tableConfig,
+            serverConfig.preSignedUrlTimeoutSeconds,
+            serverConfig.evaluatePredicateHints,
+            serverConfig.evaluateJsonPredicateHints,
+            serverConfig.evaluateJsonPredicateHintsV2,
+            serverConfig.queryTablePageSizeLimit,
+            serverConfig.queryTablePageTokenTtlMs,
+            serverConfig.refreshTokenTtlMs
+          )
+        case "delta" | _ =>
+          new DeltaSharedTableKernel(
+            tableConfig,
+            serverConfig.preSignedUrlTimeoutSeconds,
+            serverConfig.evaluatePredicateHints,
+            serverConfig.evaluateJsonPredicateHints,
+            serverConfig.evaluateJsonPredicateHintsV2,
+            serverConfig.queryTablePageSizeLimit,
+            serverConfig.queryTablePageTokenTtlMs,
+            serverConfig.refreshTokenTtlMs
+          )
+      }
+    } else {
+      new DeltaSharedTable(
+        tableConfig,
+        serverConfig.preSignedUrlTimeoutSeconds,
+        serverConfig.evaluatePredicateHints,
+        serverConfig.evaluateJsonPredicateHints,
+        serverConfig.evaluateJsonPredicateHintsV2,
+        serverConfig.queryTablePageSizeLimit,
+        serverConfig.queryTablePageTokenTtlMs,
+        serverConfig.refreshTokenTtlMs
+      )
     }
   }
 }
