@@ -129,6 +129,7 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
   val json4sVersion = "4.0.7"
   val hadoopVersion = "3.3.4"
   val deltaVersion = "3.3.0"
+  val icebergVersion = "1.4.3"
   def ivyDeps = Agg(
     ivy"com.fasterxml.jackson.core:jackson-core:$jacksonVersion",
     ivy"com.fasterxml.jackson.core:jackson-databind:$jacksonVersion",
@@ -159,6 +160,10 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
     ivy"org.slf4j:slf4j-api:1.7.36",
     ivy"org.slf4j:slf4j-simple:1.7.36",
     ivy"net.sourceforge.argparse4j:argparse4j:0.9.0",
+    ivy"org.apache.iceberg:iceberg-core:$icebergVersion",
+    ivy"org.apache.iceberg:iceberg-api:$icebergVersion",
+    ivy"org.apache.iceberg:iceberg-parquet:$icebergVersion",
+    ivy"org.apache.iceberg:iceberg-common:$icebergVersion"
   ).map(_.excludeOrg(
     "com.fasterxml.jackson.core",
     "com.fasterxml.jackson.module",
