@@ -1451,7 +1451,7 @@ object DeltaSharingRestClient extends Logging {
 
   def apply(
       profileFile: String,
-      shareCredentialsOptions: Map[String, String],
+      shareCredentialsOptions: Map[String, String] = Map.empty,
       forStreaming: Boolean = false,
       responseFormat: String = RESPONSE_FORMAT_PARQUET,
       readerFeatures: String = ""
