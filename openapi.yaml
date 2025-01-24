@@ -1,0 +1,265 @@
+openapi: 3.0.0
+info:
+  title: Delta Sharing Protocol API
+  description: |
+    Delta Sharing is an open protocol for secure real-time exchange of large datasets,
+    which enables secure data sharing across products for the first time. It is a simple
+    REST protocol that securely shares access to part of a cloud dataset.
+  version: '1.0.0'
+
+servers:
+  - url: '{prefix}'
+    variables:
+      prefix:
+        description: The base URL for the Delta Sharing server
+        default: https://sharing.delta.io/delta-sharing
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        errorCode:
+          type: string
+        message:
+          type: string
+      required:
+        - errorCode
+        - message
+
+    Protocol:
+      type: object
+      properties:
+        minReaderVersion:
+          type: integer
+          description: The minimum version of the protocol that a client must implement
+          example: 1
+      required:
+        - minReaderVersion
+
+    Format:
+      type: object
+      properties:
+        provider:
+          type: string
+          example: "parquet"
+      required:
+        - provider
+
+    Metadata:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique identifier for this table
+        name:
+          type: string
+          description: User-provided identifier for this table
+        description:
+          type: string
+          description: User-provided description for this table
+        format:
+          $ref: '#/components/schemas/Format'
+        schemaString:
+          type: string
+          description: Schema of the table as a serialized JSON string
+        partitionColumns:
+          type: array
+          items:
+            type: string
+          description: Names of columns by which the data is partitioned
+        configuration:
+          type: object
+          additionalProperties:
+            type: string
+        version:
+          type: integer
+          format: int64
+        size:
+          type: integer
+          format: int64
+        numFiles:
+          type: integer
+          format: int64
+      required:
+        - id
+        - format
+        - schemaString
+        - partitionColumns
+
+  parameters:
+    maxResults:
+      name: maxResults
+      in: query
+      description: Maximum number of results to return
+      schema:
+        type: integer
+        minimum: 1
+    pageToken:
+      name: pageToken
+      in: query
+      description: Token for pagination
+      schema:
+        type: string
+    deltaCapabilities:
+      name: delta-sharing-capabilities
+      in: header
+      description: Semicolon separated capabilities
+      schema:
+        type: string
+        example: "responseformat=delta;readerfeatures=deletionvectors,columnmapping"
+
+security:
+  - bearerAuth: []
+
+paths:
+  /shares:
+    get:
+      summary: List Shares
+      description: Lists all shares available to the authenticated recipient
+      parameters:
+        - $ref: '#/components/parameters/maxResults'
+        - $ref: '#/components/parameters/pageToken'
+      responses:
+        '200':
+          description: Successfully retrieved shares
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /shares/{share}:
+    get:
+      summary: Get Share
+      parameters:
+        - name: share
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successfully retrieved share details
+        '404':
+          description: Share not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /shares/{share}/schemas:
+    get:
+      summary: List Schemas in a Share
+      parameters:
+        - name: share
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/maxResults'
+        - $ref: '#/components/parameters/pageToken'
+      responses:
+        '200':
+          description: Successfully retrieved schemas
+
+  /shares/{share}/schemas/{schema}/tables:
+    get:
+      summary: List Tables in a Schema
+      parameters:
+        - name: share
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: schema
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/maxResults'
+        - $ref: '#/components/parameters/pageToken'
+      responses:
+        '200':
+          description: Successfully retrieved tables
+
+  /shares/{share}/schemas/{schema}/tables/{table}/metadata:
+    get:
+      summary: Query Table Metadata
+      parameters:
+        - name: share
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: schema
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/deltaCapabilities'
+      responses:
+        '200':
+          description: Successfully retrieved table metadata
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+
+  /shares/{share}/schemas/{schema}/tables/{table}/query:
+    post:
+      summary: Read Data from a Table
+      parameters:
+        - name: share
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: schema
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/deltaCapabilities'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                predicateHints:
+                  type: array
+                  items:
+                    type: string
+                limitHint:
+                  type: integer
+      responses:
+        '200':
+          description: Successfully retrieved table data
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
