@@ -129,6 +129,7 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
   val json4sVersion = "4.0.7"
   val hadoopVersion = "3.3.4"
   val deltaVersion = "3.3.0"
+  val tapirVersion = "1.11.13"
   def ivyDeps = Agg(
     ivy"com.fasterxml.jackson.core:jackson-core:$jacksonVersion",
     ivy"com.fasterxml.jackson.core:jackson-databind:$jacksonVersion",
@@ -140,6 +141,12 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
     ivy"org.json4s::json4s-ast:$json4sVersion",
     ivy"com.thesamet.scalapb::scalapb-json4s:0.12.2",
   ) ++ Agg(
+    ivy"com.softwaremill.sttp.tapir::tapir-core:$tapirVersion",
+    ivy"com.softwaremill.sttp.tapir::tapir-json-json4s:$tapirVersion",
+    ivy"org.json4s::json4s-native:4.0.7",
+    ivy"com.softwaremill.sttp.tapir::tapir-swagger-ui-bundle:$tapirVersion",
+    ivy"com.softwaremill.sttp.tapir::tapir-openapi-docs:$tapirVersion",
+    ivy"com.softwaremill.sttp.tapir::tapir-files:1.11.12",
     ivy"org.bouncycastle:bcprov-jdk18on:1.76",
     ivy"com.linecorp.armeria::armeria-scalapb:$armeriaVersion".excludeOrg("org.json4s"),
     ivy"org.apache.hadoop:hadoop-common:$hadoopVersion",
