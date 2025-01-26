@@ -68,6 +68,10 @@ trait DeltaSharingIntegrationTest extends SparkFunSuite with BeforeAndAfterAll {
               startLatch.countDown()
             }
           }
+          //io.delta.sharing.server.TestDeltaSharingServer.run(pidFile.getCanonicalPath, (port: Int) => {
+          //  println(s"Server is running on port $port")
+          //  startLatch.countDown()
+          //})
           process =
             Seq(
               "/bin/bash",
