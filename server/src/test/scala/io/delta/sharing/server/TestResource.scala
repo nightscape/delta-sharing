@@ -56,6 +56,7 @@ object TestResource {
       FileUtils.writeStringToFile(credFilePath, serviceAccountKey, UTF_8, false)
     }
   }
+  val basePath = s"s3a://${AWS.bucket}/delta-exchange-test"
 
   def setupTestTables(): File = {
     val testConfigFile = Files.createTempFile("delta-sharing", ".yaml").toFile
@@ -69,17 +70,17 @@ object TestResource {
             java.util.Arrays.asList(
               TableConfig(
                 "table1",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table1",
+                s"$basePath/table1",
                 "00000000-0000-0000-0000-000000000001"
               ),
               TableConfig(
                 "table3",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table3",
+                s"$basePath/table3",
                 "00000000-0000-0000-0000-000000000003"
               ),
               TableConfig(
                 "table7",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table7",
+                s"$basePath/table7",
                 "00000000-0000-0000-0000-000000000007"
               )
             )
@@ -91,7 +92,7 @@ object TestResource {
           SchemaConfig("default", java.util.Arrays.asList(
             TableConfig(
               "table2",
-              s"s3a://${AWS.bucket}/delta-exchange-test/table2",
+              s"$basePath/table2",
               "00000000-0000-0000-0000-000000000002"
             )
           )
@@ -104,12 +105,12 @@ object TestResource {
             java.util.Arrays.asList(
               TableConfig(
                 "table4",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table4",
+                s"$basePath/table4",
                 "00000000-0000-0000-0000-000000000004"
               ),
               TableConfig(
                 "table5",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table5",
+                s"$basePath/table5",
                 "00000000-0000-0000-0000-000000000005"
               )
             )
@@ -149,7 +150,7 @@ object TestResource {
             java.util.Arrays.asList(
               TableConfig(
                 "table8",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table8",
+                s"$basePath/table8",
                 "00000000-0000-0000-0000-000000000008"
               )
             )
@@ -159,7 +160,7 @@ object TestResource {
             java.util.Arrays.asList(
               TableConfig(
                 "table9",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table9",
+                s"$basePath/table9",
                 "00000000-0000-0000-0000-000000000009"
               )
             )
@@ -220,107 +221,107 @@ object TestResource {
               ),
               TableConfig(
                 "cdf_table_cdf_enabled",
-                s"s3a://${AWS.bucket}/delta-exchange-test/cdf_table_cdf_enabled",
+                s"$basePath/cdf_table_cdf_enabled",
                 "00000000-0000-0000-0000-000000000095",
                 historyShared = true
               ),
               TableConfig(
                 "cdf_table_with_partition",
-                s"s3a://${AWS.bucket}/delta-exchange-test/cdf_table_with_partition",
+                s"$basePath/cdf_table_with_partition",
                 "00000000-0000-0000-0000-000000000094",
                 historyShared = true,
                 startVersion = 1
               ),
               TableConfig(
                 "cdf_table_with_vacuum",
-                s"s3a://${AWS.bucket}/delta-exchange-test/cdf_table_with_vacuum",
+                s"$basePath/cdf_table_with_vacuum",
                 "00000000-0000-0000-0000-000000000093",
                 historyShared = true
               ),
               TableConfig(
                 "cdf_table_missing_log",
-                s"s3a://${AWS.bucket}/delta-exchange-test/cdf_table_missing_log",
+                s"$basePath/cdf_table_missing_log",
                 "00000000-0000-0000-0000-000000000092",
                 historyShared = true
               ),
               TableConfig(
                 "streaming_table_with_optimize",
-                s"s3a://${AWS.bucket}/delta-exchange-test/streaming_table_with_optimize",
+                s"$basePath/streaming_table_with_optimize",
                 "00000000-0000-0000-0000-000000000091",
                 historyShared = true
               ),
               TableConfig(
                 "streaming_table_metadata_protocol",
-                s"s3a://${AWS.bucket}/delta-exchange-test/streaming_table_metadata_protocol",
+                s"$basePath/streaming_table_metadata_protocol",
                 "00000000-0000-0000-0000-000000000090",
                 historyShared = true
               ),
               TableConfig(
                 "streaming_notnull_to_null",
-                s"s3a://${AWS.bucket}/delta-exchange-test/streaming_notnull_to_null",
+                s"$basePath/streaming_notnull_to_null",
                 "00000000-0000-0000-0000-000000000089",
                 historyShared = true
               ),
               TableConfig(
                 "streaming_null_to_notnull",
-                s"s3a://${AWS.bucket}/delta-exchange-test/streaming_null_to_notnull",
+                s"$basePath/streaming_null_to_notnull",
                 "00000000-0000-0000-0000-000000000088",
                 historyShared = true
               ),
               TableConfig(
                 "streaming_cdf_null_to_notnull",
-                s"s3a://${AWS.bucket}/delta-exchange-test/streaming_cdf_null_to_notnull",
+                s"$basePath/streaming_cdf_null_to_notnull",
                 "00000000-0000-0000-0000-000000000087",
                 historyShared = true
               ),
               TableConfig(
                 "streaming_cdf_table",
-                s"s3a://${AWS.bucket}/delta-exchange-test/streaming_cdf_table",
+                s"$basePath/streaming_cdf_table",
                 "00000000-0000-0000-0000-000000000086",
                 historyShared = true
               ),
               TableConfig(
                 "table_reader_version_increased",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table_reader_version_increased",
+                s"$basePath/table_reader_version_increased",
                 "00000000-0000-0000-0000-000000000085",
                 historyShared = true
               ),
               TableConfig(
                 "table_with_no_metadata",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table_with_no_metadata",
+                s"$basePath/table_with_no_metadata",
                 "00000000-0000-0000-0000-000000000084",
                 historyShared = true
               ),
               TableConfig(
                 "table_data_loss_with_checkpoint",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table_data_loss_with_checkpoint",
+                s"$basePath/table_data_loss_with_checkpoint",
                 "00000000-0000-0000-0000-000000000083",
                 historyShared = true
               ),
               TableConfig(
                 "table_data_loss_no_checkpoint",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table_data_loss_no_checkpoint",
+                s"$basePath/table_data_loss_no_checkpoint",
                 "00000000-0000-0000-0000-000000000082",
                 historyShared = true
               ),
               TableConfig(
                 "table_with_cm_name",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table_with_cm_name",
+                s"$basePath/table_with_cm_name",
                 "00000000-0000-0000-0000-000000000081"
               ),
               TableConfig(
                 "table_with_cm_id",
-                s"s3a://${AWS.bucket}/delta-exchange-test/table_with_cm_id",
+                s"$basePath/table_with_cm_id",
                 "00000000-0000-0000-0000-000000000080"
               ),
               TableConfig(
                 "deletion_vectors_with_dvs_dv_property_on",
-                s"s3a://${AWS.bucket}/delta-exchange-test/deletion_vectors_with_dvs_dv_property_on",
+                s"$basePath/deletion_vectors_with_dvs_dv_property_on",
                 "00000000-0000-0000-0000-000000000079"
               ),
               TableConfig(
                 "dv_and_cm_table",
-                s"s3a://${AWS.bucket}/delta-exchange-test/dv_and_cm_table",
+                s"$basePath/dv_and_cm_table",
                 "00000000-0000-0000-0000-000000000078"
               )
             )
