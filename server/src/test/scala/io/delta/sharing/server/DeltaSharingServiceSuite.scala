@@ -50,14 +50,14 @@ class DeltaSharingServiceSuite extends AnyFunSuite with BeforeAndAfterAll {
       sys.env.get("GOOGLE_APPLICATION_CREDENTIALS").exists(_.length > 0)
   }
 
-  private var serverConfig: ServerConfig = _
-  private var server: Server = _
+  protected var serverConfig: ServerConfig = _
+  protected var server: Server = _
 
   /**
    * Disable the ssl verification for Java's HTTP client because our local test server doesn't have
    * CA-signed certificate.
    */
-  private def allowUntrustedServer(): Unit = {
+  protected def allowUntrustedServer(): Unit = {
     val trustAllCerts = Array[TrustManager](new X509TrustManager {
       override def getAcceptedIssuers(): Array[X509Certificate] = null
 
@@ -74,7 +74,7 @@ class DeltaSharingServiceSuite extends AnyFunSuite with BeforeAndAfterAll {
     HttpsURLConnection.setDefaultHostnameVerifier(allHostsValid)
   }
 
-  private def verifyPreSignedUrl(url: String, expectedLength: Int): Unit = {
+  protected def verifyPreSignedUrl(url: String, expectedLength: Int): Unit = {
     // We should be able to read from the url
     assert(IOUtils.toByteArray(new URL(url)).size == expectedLength)
 
@@ -3853,6 +3853,14 @@ class DeltaSharingServiceSuite extends AnyFunSuite with BeforeAndAfterAll {
     )
   }
 
+}
+
+class CloudDeltaSharingServiceSuite extends DeltaSharingServiceSuite {
+  override def shouldRunIntegrationTest: Boolean = {
+    sys.env.get("AWS_ACCESS_KEY_ID").exists(_.length > 0) &&
+      sys.env.get("AZURE_TEST_ACCOUNT_KEY").exists(_.length > 0) &&
+      sys.env.get("GOOGLE_APPLICATION_CREDENTIALS").exists(_.length > 0)
+  }
   test("azure support", IntegrationTest) {
     for (azureTableName <- "table_wasb" :: "table_abfs" :: Nil) {
       val response = readNDJson(requestPath(s"/shares/share_azure/schemas/default/tables/${azureTableName}/query"), Some("POST"), Some("{}"), Some(0))
