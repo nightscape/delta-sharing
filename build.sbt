@@ -233,7 +233,7 @@ lazy val server = (project in file("server")) enablePlugins(JavaAppPackaging) se
       ExclusionRule("com.fasterxml.jackson.module"),
       ExclusionRule("com.google.guava", "guava")
     ),
-    "org.apache.spark" %% "spark-sql" % "2.4.7" excludeAll(
+    "org.apache.spark" %% "spark-sql" % "3.3.4" excludeAll(
       ExclusionRule("org.slf4j"),
       ExclusionRule("io.netty"),
       ExclusionRule("com.fasterxml.jackson.core"),
