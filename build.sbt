@@ -214,6 +214,7 @@ lazy val server = (project in file("server")) enablePlugins(JavaAppPackaging) se
     "org.slf4j" % "slf4j-simple" % "1.6.1",
     "net.sourceforge.argparse4j" % "argparse4j" % "0.9.0",
 
+    "org.apache.parquet" % "parquet-avro" % "1.12.3" % "test",
     "org.scalatest" %% "scalatest" % "3.2.19" % "test",
     "dev.zio" %% "zio-test" % "2.0.19" % "test",
     "dev.zio" %% "zio-test-sbt" % "2.0.19" % "test",

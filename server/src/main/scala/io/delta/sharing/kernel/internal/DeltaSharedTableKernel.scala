@@ -40,15 +40,16 @@ import io.delta.kernel.internal.actions.{DeletionVectorDescriptor => KernelDelet
 import io.delta.kernel.internal.util.{InternalUtils, VectorUtils}
 import io.delta.kernel.types.{StructType => KernelStructType}
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.{LocalFileSystem, Path}
 import org.apache.hadoop.fs.azure.NativeAzureFileSystem
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem
 import org.apache.hadoop.fs.s3a.S3AFileSystem
+import org.apache.hadoop.security.UserGroupInformation
 import org.apache.spark.sql.types.{DataType, MetadataBuilder, StructType}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
 
 import io.delta.sharing.server.{DeltaSharedTableProtocol, DeltaSharingIllegalArgumentException, DeltaSharingUnsupportedOperationException, ErrorStrings, QueryResult}
-import io.delta.sharing.server.common.{AbfsFileSigner, GCSFileSigner, JsonUtils, S3FileSigner, SnapshotChecker, WasbFileSigner}
+import io.delta.sharing.server.common.{AbfsFileSigner, GCSFileSigner, JsonUtils, LocalFileSigner, S3FileSigner, SnapshotChecker, WasbFileSigner}
 import io.delta.sharing.server.common.actions.{DeletionVectorDescriptor, DeletionVectorsTableFeature, DeltaAddFile, DeltaFormat, DeltaProtocol, DeltaSingleAction}
 import io.delta.sharing.server.config.TableConfig
 import io.delta.sharing.server.model._
@@ -102,6 +103,13 @@ class DeltaSharedTableKernel(
         AbfsFileSigner(abfs, dataPath, preSignedUrlTimeoutSeconds)
       case gc: GoogleHadoopFileSystem =>
         new GCSFileSigner(dataPath, conf, preSignedUrlTimeoutSeconds)
+      case hdfs: LocalFileSystem =>
+        try { UserGroupInformation.getLoginUser() } catch {
+          case e: Exception =>
+            println("Could not get HDFS login user, it might work if you are running using a local HDFS though")
+            println(e)
+        }
+        new LocalFileSigner(dataPath, conf, preSignedUrlTimeoutSeconds)
       case _ =>
         throw new IllegalStateException(s"File system ${fs.getClass} is not supported")
     }
@@ -647,7 +655,7 @@ class DeltaSharedTableKernel(
 
   // Get the partition columns from Kernel Metadata.
   private def getPartitionColumns(metadata: KernelMetadata): Seq[String] = {
-    VectorUtils.toJavaList[String](metadata.getPartitionColumns).asScala
+    VectorUtils.toJavaList[String](metadata.getPartitionColumns).asScala.toSeq
   }
 
   // Construct the Delta format DeletionVectorDescriptor class from Kernel format.
