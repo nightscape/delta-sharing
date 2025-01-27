@@ -243,3 +243,21 @@ object GCSFileSigner {
     (resourceId.getBucketName, resourceId.getObjectName)
   }
 }
+
+class LocalFileSigner(
+    name: URI,
+    conf: Configuration,
+    preSignedUrlTimeoutSeconds: Long) extends CloudFileSigner {
+  override def sign(path: Path): PreSignedUrl = {
+    val absolutePath = path.toUri
+    assert(absolutePath.getPath.nonEmpty, s"cannot get path from $path")
+    val tokenString = delegationToken
+      .headOption
+      .map(token => s"?delegation=${token.encodeToUrlString()}")
+      .getOrElse("")
+    PreSignedUrl(
+      absolutePath.toString,
+      System.currentTimeMillis() + SECONDS.toMillis(preSignedUrlTimeoutSeconds)
+    )
+  }
+}
