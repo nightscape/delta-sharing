@@ -1,0 +1,256 @@
+import mill._, scalalib._, publish._
+import mill.define.ModuleRef
+import mill.scalalib.Assembly._
+
+import $ivy.`com.goyeau::mill-scalafix::0.5.1`
+import com.goyeau.mill.scalafix.ScalafixModule
+
+import $ivy.`com.lihaoyi::mill-contrib-scalapblib:`
+import contrib.scalapblib._
+
+import $ivy.`com.lihaoyi:mill-dist:0.12.8`
+import $ivy.`com.ofenbeck::mill-docker_mill0.11:0.0.2`
+import com.ofenbeck.mill.docker.DockerJibModule
+import com.google.cloud.tools.jib.api._
+import com.google.cloud.tools.jib.api.buildplan._
+import java.nio.file.Path
+import java.time.Instant
+
+val sparkVersion = "4.0.0"
+val scala212 = "2.12.20"
+val scala213 = "2.13.16"
+
+object ZincWorkerJava11 extends ZincWorkerModule {
+  def jvmId = "graalvm-java17"
+}
+
+trait CommonModule extends SbtModule with PublishModule {
+  def zincWorker = ModuleRef(ZincWorkerJava11)
+  //def scalacOptions = Seq("-target:jvm-1.8")
+  //def javacOptions = Seq("-source", "1.8", "-target", "1.8")
+
+  def forkArgs = Seq(
+    "-Dspark.ui.enabled=false",
+    "-Dspark.ui.showConsoleProgress=false",
+    "-Dspark.databricks.delta.snapshotPartitions=2",
+    "-Dspark.sql.shuffle.partitions=5",
+    "-Dspark.sql.sources.parallelPartitionDiscovery.parallelism=5",
+    "-Dspark.delta.sharing.network.sslTrustAll=true",
+    s"-Dazure.account.key=${sys.env.getOrElse("AZURE_TEST_ACCOUNT_KEY", "")}",
+    "-Xmx1024m"
+  )
+
+  def moduleName = T(millSourcePath.last)
+  override def artifactName: T[String] = T(s"delta-sharing-${moduleName()}")
+  def publishVersion = "1.1.11"
+  def description: String = "Delta Sharing"
+  def pomSettings = PomSettings(
+    description = description,
+    organization = "io.delta",
+    url = "https://github.com/delta-io/delta-sharing",
+    licenses = Seq(License.`Apache-2.0`),
+    versionControl = VersionControl.github("delta-io", "delta-sharing"),
+    developers = Seq()
+  )
+  override def generatedSources = T {
+    val dir = T.dest / "io" / "delta" / "sharing" / moduleName()
+    os.makeDir.all(dir)
+    os.write(
+      dir / "package.scala",
+      s"""package io.delta.sharing
+         |
+         |package object ${moduleName()} {
+         |  val VERSION = "${publishVersion()}"
+         |}
+         |""".stripMargin
+    )
+    Seq(PathRef(T.dest))
+  }
+}
+
+trait CommonTestModule extends TestModule.ScalaTest {
+  def testFramework = "org.scalatest.tools.Framework"
+  def ivyDeps = Agg(
+    ivy"org.scalatest::scalatest:3.2.3",
+    ivy"org.scalatestplus::mockito-4-11:3.2.18.0"
+  )
+}
+
+object client extends Cross[ClientModule](scala213)
+trait ClientModule extends CrossSbtModule with CommonModule {
+  def ivyDeps = Agg(
+    ivy"org.apache.httpcomponents:httpclient:4.5.14",
+    ivy"org.apache.spark::spark-sql:$sparkVersion"
+  )
+
+  object test extends SbtTests with CommonTestModule {
+    def ivyDeps = super.ivyDeps() ++ Agg(
+      ivy"org.apache.spark::spark-catalyst:$sparkVersion;classifier=tests",
+      ivy"org.apache.spark::spark-core:$sparkVersion;classifier=tests",
+      ivy"org.apache.spark::spark-sql:$sparkVersion;classifier=tests",
+    )
+  }
+}
+
+object spark extends Cross[SparkModule](scala213)
+trait SparkModule extends CrossSbtModule with CommonModule { outer =>
+  def moduleDeps = Seq(client())
+
+  def ivyDeps = Agg(
+    ivy"org.apache.spark::spark-sql:$sparkVersion".excludeOrg("com.google.protobuf"),
+  )
+  object test extends SbtTests with CommonTestModule {
+    def ivyDeps = (outer.ivyDeps() ++ super.ivyDeps() ++ Agg(
+      ivy"org.apache.spark::spark-catalyst:$sparkVersion;classifier=tests",
+      ivy"org.apache.spark::spark-core:$sparkVersion;classifier=tests",
+      ivy"org.apache.spark::spark-sql:$sparkVersion;classifier=tests",
+    )).map(_.excludeOrg("com.google.protobuf"))
+  }
+}
+
+object server extends SbtModule with CommonModule with ScalaPBModule with DockerJibModule with ScalafixModule {
+  def scalaVersion = scala213
+  def scalaPBVersion = "0.11.7"
+  def scalaPBSources: T[Seq[PathRef]] = Task.Sources {
+    millSourcePath / "src/main/protobuf"
+  }
+  def scalaPBSearchDeps: Boolean = true
+
+  override def bomIvyDeps = Agg(
+    ivy"io.grpc:grpc-bom:1.41.1"
+  )
+  override def depManagement = Agg(
+    ivy"org.apache.spark::spark-sql:$sparkVersion"
+  )
+  def forkJvmArgs = T { Seq("-Xss32m") }
+  val armeriaVersion = "1.9.2"
+  val parquetVersion = "1.15.2"
+  val jacksonVersion = "2.15.2"
+  val json4sVersion = "4.0.7"
+  val hadoopVersion = "3.3.4"
+  val deltaVersion = "3.3.0"
+  def ivyDeps = Agg(
+    ivy"com.fasterxml.jackson.core:jackson-core:$jacksonVersion",
+    ivy"com.fasterxml.jackson.core:jackson-databind:$jacksonVersion",
+    ivy"com.fasterxml.jackson.module::jackson-module-scala:$jacksonVersion",
+    ivy"com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:$jacksonVersion",
+    ivy"com.google.protobuf:protobuf-java:3.19.1",
+    ivy"org.json4s::json4s-core:$json4sVersion",
+    ivy"org.json4s::json4s-jackson:$json4sVersion",
+    ivy"org.json4s::json4s-ast:$json4sVersion",
+    ivy"com.thesamet.scalapb::scalapb-json4s:0.12.2",
+  ) ++ Agg(
+    ivy"org.bouncycastle:bcprov-jdk18on:1.76",
+    ivy"com.linecorp.armeria::armeria-scalapb:$armeriaVersion".excludeOrg("org.json4s"),
+    ivy"org.apache.hadoop:hadoop-common:$hadoopVersion",
+    ivy"org.apache.hadoop:hadoop-client:$hadoopVersion",
+    ivy"org.apache.hadoop:hadoop-aws:$hadoopVersion",
+    ivy"org.apache.hadoop:hadoop-azure:$hadoopVersion",
+    ivy"com.amazonaws:aws-java-sdk-bundle:1.12.189",
+    ivy"com.google.cloud:google-cloud-storage:2.2.2",
+    ivy"com.google.cloud.bigdataoss:gcs-connector:hadoop2-2.2.4",
+    ivy"org.apache.parquet:parquet-hadoop:$parquetVersion",
+    ivy"org.apache.parquet:parquet-avro:$parquetVersion",
+    ivy"io.delta::delta-standalone:$deltaVersion",
+    ivy"io.delta:delta-kernel-api:$deltaVersion",
+    ivy"io.delta:delta-kernel-defaults:$deltaVersion",
+    ivy"org.apache.spark::spark-sql:$sparkVersion",
+    ivy"org.slf4j:jul-to-slf4j:1.7.36",
+    ivy"org.slf4j:slf4j-api:1.7.36",
+    ivy"org.slf4j:slf4j-simple:1.7.36",
+    ivy"net.sourceforge.argparse4j:argparse4j:0.9.0",
+  ).map(_.excludeOrg(
+    "com.fasterxml.jackson.core",
+    "com.fasterxml.jackson.module",
+    "com.google.protobuf"
+  ))
+  def prependShellScript = ""
+
+  object test extends SbtTests with CommonTestModule {
+    val hedgehogVersion = "0.11.0"
+    def ivyDeps = Agg(
+      ivy"org.scalatest::scalatest:3.2.19",
+      ivy"io.delta::delta-core:2.4.0",
+      ivy"dev.zio::zio-test:2.1.14",
+    )
+
+    def moduleDeps = super.moduleDeps ++ Seq(spark(scala213))
+    def forkArgs = T {
+      super.forkArgs() ++ Seq("--add-modules", "java.security.jgss")
+    }
+    def forkEnv = T {
+      super.forkEnv() ++ Map(
+        "SSL_TRUSTSTORES_PATH" -> (millSourcePath / os.up / "examples" / exampleDir / "truststore").toString
+      )
+    }
+    def prependShellScript = ""
+  }
+    override def resources: T[Seq[PathRef]] = T.sources {
+      Seq(
+        millSourcePath / "src" / "test" / "resources" / "docker",
+      ).map(PathRef(_))
+    }
+  object docker extends DockerConfig {
+    import com.ofenbeck.mill.docker._
+    def targetImage = JibImage.DockerDaemonImage("nightscape/delta-sharing-server")
+
+    def sourceImage = JibImage.RegistryImage("openjdk:11")
+    def labels = T {
+      Map(
+        "com.ofenbeck.mill.docker"         -> "javaBuildSettings",
+        "com.ofenbeck.mill.docker.version" -> "0.0.5",
+      )
+    }
+    def platforms = T {
+      Set(
+        Platform("linux", "arm64"),
+        Platform("linux", "amd64"),
+      )
+    }
+    def pullBaseImage = true
+    def exposedPorts = Seq(8080)
+    def jibProgramArgs = T {
+      Seq("-c", "/server-config.yaml")
+    }
+        /** Hook to modify the JibContainerBuilder before it is used to build the container. An "empty" JibContainerBuilder
+      * is passed to the hook (from the configured SoureImage). In addition the FileEntriesLayer and the entrypoints of
+      * a default JavaBuild are passed to the hook. You have to add both again to the "empty" JibContainerBuilder to get
+      * the same behavior as the default JavaBuild.
+      * @return
+      *   The return value is used for further processing of the JibContainerBuilder - so full replacement is possible.
+      */
+    override def getJibBuilder: Task[JibContainerBuilder] = Task.Anon {
+      //this takes the default JavaContainerBuilder
+      val emptyJibBuilder = super.getJibBuilder()
+
+      //we are adding the Azure agent to the container as a seperate layer with some custom permissions
+      import com.google.cloud.tools.jib.api.buildplan._
+      val sourcefile: Path                  = (test.resources().head.path /"docker/server-config.yaml").toNIO
+      val pathInContainer: AbsoluteUnixPath = AbsoluteUnixPath.get("/server-config.yaml")
+      val permissions: FilePermissions      = FilePermissions.fromOctalString("444")
+      val modificationTime: Instant         = Instant.EPOCH
+      val ownership: String                 = "root:root"
+
+      val layer = FileEntriesLayer
+        .builder()
+        .addEntry(sourcefile, pathInContainer, permissions, modificationTime, ownership)
+        .build()
+      emptyJibBuilder.addFileEntriesLayer(layer)
+      emptyJibBuilder
+    }
+    override def getJavaBuilder: Task[JavaContainerBuilder] = Task.Anon {
+        T.ctx().log.info("Added Azure agent to the container")
+        val builder = super.getJavaBuilder()
+        builder.addResources((test.resources().head.path /"docker").toNIO)
+        builder
+    }
+    override def entrypoint = T {
+      Seq(
+        "sh",
+        "-c",
+        "java -cp /app/libs/*:/app/resources:/app/classes:/app/dependency/* io.delta.sharing.server.DeltaSharingService -c /server-config.yaml",
+      )
+    }
+  }
+}
+
