@@ -57,4 +57,6 @@ trait DeltaSharedTableProtocol {
 
   def getPartitionSpecLogicalToPhysicalMap(inputFullHistoryShared: Boolean): Map[String, String] =
     Map.empty
+
+  def update(): Unit = {}
 }
