@@ -191,7 +191,8 @@ lazy val server = (project in file("server")) enablePlugins(JavaAppPackaging) se
     "org.apache.parquet" % "parquet-avro" % "1.12.3" % "test",
     "org.scalatest" %% "scalatest" % "3.2.19" % "test",
     "dev.zio" %% "zio-test" % "2.0.19" % "test",
-    "dev.zio" %% "zio-test-sbt" % "2.0.19" % "test"
+    "dev.zio" %% "zio-test-sbt" % "2.0.19" % "test",
+    "com.github.jatcwang" %% "difflicious-core" % "0.4.3" % "test",
   ),
   Compile / PB.targets := Seq(
     scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
