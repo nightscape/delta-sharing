@@ -249,6 +249,7 @@ lazy val server = (project in file("server")) enablePlugins(JavaAppPackaging) se
     "org.scalatest" %% "scalatest" % "3.2.19" % "test",
     "dev.zio" %% "zio-test" % "2.0.19" % "test",
     "dev.zio" %% "zio-test-sbt" % "2.0.19" % "test",
+    "com.github.jatcwang" %% "difflicious-core" % "0.4.3" % "test",,
     "org.bouncycastle" % "bcprov-jdk15on" % "1.70" % "test",
     "org.bouncycastle" % "bcpkix-jdk15on" % "1.70" % "test"
   ),
