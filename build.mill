@@ -172,6 +172,7 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
       ivy"org.scalatest::scalatest:3.2.19",
       ivy"io.delta::delta-core:2.4.0",
       ivy"dev.zio::zio-test:2.1.14",
+      ivy"com.github.jatcwang::difflicious-core:0.4.3",
     )
 
     def moduleDeps = super.moduleDeps ++ Seq(spark(scala213))

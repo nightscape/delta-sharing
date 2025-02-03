@@ -1,5 +1,7 @@
 package io.delta.sharing.server
 
+import difflicious._
+import difflicious.implicits._
 import io.delta.sharing.client.model.Table
 import io.delta.sharing.client.{DeltaSharingClient, DeltaSharingRestClient}
 import io.delta.standalone.Operation
@@ -15,7 +17,7 @@ import org.apache.spark.sql.types.{
   StructType => SparkStructType
 }
 import org.apache.spark.sql.{Row, SaveMode, SparkSession}
-import zio._
+import zio.{Differ => _, _}
 import zio.test._
 
 import java.io.File
@@ -166,6 +168,15 @@ object PropertyTest extends ZIOSpecDefault {
       serverLayer
     )
 
+  implicit val protocolDiffer: Differ[clientModel.Protocol] = Differ.alwaysIgnore
+  implicit val metadataDiffer: Differ[clientModel.Metadata] = Differ.alwaysIgnore
+  implicit val addFileDiffer: Differ[clientModel.AddFile] = Differ.useEquals[clientModel.AddFile](_.toString())
+  implicit val addFileForCdfDiffer: Differ[clientModel.AddFileForCDF] = Differ.useEquals[clientModel.AddFileForCDF](_.toString())
+  implicit val addFilesForCdfSeqDiffer: Differ[Seq[clientModel.AddFileForCDF]] = Differ.seqDiffer[Seq, clientModel.AddFileForCDF].pairBy(_.url)
+  implicit val addCdcFileDiffer: Differ[clientModel.AddCDCFile] = Differ.useEquals[clientModel.AddCDCFile](_.toString())
+  implicit val addCdcFileSeqDiffer: Differ[Seq[clientModel.AddCDCFile]] = Differ.seqDiffer[Seq, clientModel.AddCDCFile].pairBy(_.url)
+  implicit val removeFileDiffer: Differ[clientModel.RemoveFile] = Differ.useEquals[clientModel.RemoveFile](_.toString())
+  implicit val deltaTableFilesDiffer: Differ[clientModel.DeltaTableFiles] = Differ.derived[clientModel.DeltaTableFiles]
   case class TableState(
       tableId: String,
       tablePath: String,
@@ -173,19 +184,15 @@ object PropertyTest extends ZIOSpecDefault {
       currentVersion: Option[Long] = None,
       currentSchema: Option[StructType] = None,
       knownPartitionValues: Map[String, Set[String]] = Map.empty,
-      lastError: Option[Throwable] = None
   ) {
     // Convenience method for appending a commit
     def addCommit(commit: Commit): TableState =
-      copy(commits = commits :+ commit, currentVersion = Some(commit.version))
-
-    def cdfChanges: clientModel.DeltaTableFiles =
-      getCDFFiles(Map.empty, includeHistoricalMetadata = false)
+      copy(commits = commits :+ commit, currentVersion = currentVersion.orElse(Some(0L)).map(_ + 1))
 
     /** Updated replay to support legacy AddFile, AddFileForCDF and AddCDCFile *
       */
     def getFiles(
-        startingVersion: Long,
+        startingVersion: Option[Long],
         endingVersion: Option[Long]
     ): clientModel.DeltaTableFiles = {
       if (commits.size < 2) {
@@ -212,9 +219,14 @@ object PropertyTest extends ZIOSpecDefault {
       val removeFiles = ArrayBuffer[clientModel.RemoveFile]()
       val additionalMetadatas = ArrayBuffer[clientModel.Metadata]()
       var version = 0L
-      commits.foreach { commit =>
-        commit.actions.foreach { action =>
-          action match {
+      commits
+        .filter(c =>
+          startingVersion.forall(_ <= c.version) && endingVersion.forall(
+            _ >= c.version
+          )
+        )
+        .foreach { commit =>
+          commit.actions.foreach {
             case a: clientModel.AddFile =>
               // Legacy action – convert it on the fly.
               version = math.max(version, commit.version)
@@ -248,7 +260,6 @@ object PropertyTest extends ZIOSpecDefault {
               )
           }
         }
-      }
       val finalVersion = endingVersion.getOrElse(version)
       clientModel.DeltaTableFiles(
         version = finalVersion,
@@ -264,8 +275,11 @@ object PropertyTest extends ZIOSpecDefault {
 
     /** Updated getCDFFiles with similar changes * */
     def getCDFFiles(
-        cdfOptions: Map[String, String],
-        includeHistoricalMetadata: Boolean
+        startingVersion: Option[Long] = None,
+        endingVersion: Option[Long] = None,
+        startingTimestamp: Option[String] = None,
+        endingTimestamp: Option[String] = None,
+        includeHistoricalMetadata: Boolean = false
     ): clientModel.DeltaTableFiles = {
       if (commits.size < 1) {
         throw new IllegalStateException(
@@ -283,12 +297,6 @@ object PropertyTest extends ZIOSpecDefault {
         )
       }
       val metadata = firstCommit.actions(1).asInstanceOf[clientModel.Metadata]
-      val startingTimestampOpt = cdfOptions
-        .get("startingTimestamp")
-        .flatMap(ts => scala.util.Try(ts.toLong).toOption)
-      val endingTimestampOpt = cdfOptions
-        .get("endingTimestamp")
-        .flatMap(ts => scala.util.Try(ts.toLong).toOption)
 
       val addFiles = ArrayBuffer[clientModel.AddFileForCDF]()
       val cdcFiles = ArrayBuffer[clientModel.AddCDCFile]()
@@ -297,8 +305,10 @@ object PropertyTest extends ZIOSpecDefault {
       var version = 0L
       commits.drop(1).foreach { commit =>
         if (
-          startingTimestampOpt.forall(ts => commit.timestamp >= ts) &&
-          endingTimestampOpt.forall(ts => commit.timestamp <= ts)
+          startingVersion.forall(_ <= commit.version) &&
+          endingVersion.forall(_ >= commit.version)
+          //startingTimestamp.forall(ts => commit.timestamp >= ts) &&
+          //endingTimestamp.forall(ts => commit.timestamp <= ts)
         ) {
           commit.actions.foreach {
             case a: clientModel.AddFile =>
@@ -356,7 +366,10 @@ object PropertyTest extends ZIOSpecDefault {
       copy(tables = tables.filter(_._1 != id))
   }
 
-  case class State(
+  case class TestState(
+    deltaState: DeltaState,
+  )
+  case class DeltaState(
       schemaMap: Map[String, TestSchema] = Map(
         "test-schema" -> TestSchema("test-schema", Map.empty)
       )
@@ -365,11 +378,11 @@ object PropertyTest extends ZIOSpecDefault {
     def schemas: Set[String] = schemaMap.keySet
     def deletableSchemas: Set[String] = schemas.filter(_ != defaultSchemaId)
     def schema(id: String): Option[TestSchema] = schemaMap.get(id)
-    def addSchema(id: String): State =
+    def addSchema(id: String): DeltaState =
       if (schemaMap.contains(id)) this
       else copy(schemaMap = schemaMap + (id -> TestSchema(id, Map.empty)))
     def canRemoveSchema(id: String): Boolean = id != defaultSchemaId
-    def removeSchema(id: String): State =
+    def removeSchema(id: String): DeltaState =
       if (canRemoveSchema(id)) copy(schemaMap = schemaMap - id) else this
 
     def tables: Set[TableState] =
@@ -390,7 +403,7 @@ object PropertyTest extends ZIOSpecDefault {
         schemaId: String,
         tableId: String,
         tableState: TableState
-    ): State =
+    ): DeltaState =
       copy(schemaMap =
         schemaMap.updated(
           schemaId,
@@ -399,7 +412,7 @@ object PropertyTest extends ZIOSpecDefault {
             .addTable(tableId, tableState)
         )
       )
-    def removeTable(schemaId: String, tableId: String): State = if (
+    def removeTable(schemaId: String, tableId: String): DeltaState = if (
       !schemaMap.contains(schemaId)
     ) this
     else
@@ -408,8 +421,8 @@ object PropertyTest extends ZIOSpecDefault {
       )
   }
 
-  object State {
-    def empty: State = State()
+  object DeltaState {
+    def empty: DeltaState = DeltaState()
   }
 
   final case class Commit(
@@ -423,9 +436,9 @@ object PropertyTest extends ZIOSpecDefault {
   object CreateManagedTableCommand {
     def gen(
         basePath: Path,
-        state: State,
+        state: DeltaState,
         serverConfig: ServerConfig
-    ): Gen[Any, Command[Any, State]] =
+    ): Gen[Any, Command[Any, DeltaState]] =
       for {
         schema <- Gen.const("test-schema")
         // Only generate few different table names
@@ -448,10 +461,10 @@ object PropertyTest extends ZIOSpecDefault {
       schemaName: String,
       tableName: String,
       serverConfig: ServerConfig
-  ) extends Command[Any, State] {
+  ) extends Command[Any, DeltaState] {
     type E = Throwable
-    type Result = CommandResult[State]
-    override def execute(): ZIO[Any, Throwable, CommandResult[State]] =
+    type Result = CommandResult[DeltaState]
+    override def execute(): ZIO[Any, Throwable, CommandResult[DeltaState]] =
       ZIO.attempt {
         val targetPath = new org.apache.hadoop.fs.Path(tablePath)
         val clock = newManualClock
@@ -475,10 +488,10 @@ object PropertyTest extends ZIOSpecDefault {
           actions = Seq(
             clientModel.Protocol(protocol.getMinReaderVersion),
             clientModel.Metadata(
-              id = metadata.getId(),
-              name = metadata.getName(),
-              description = metadata.getDescription(),
-              schemaString = metadata.getSchema.toJson(),
+              id = metadata.getId,
+              name = metadata.getName,
+              description = metadata.getDescription,
+              schemaString = metadata.getSchema.toJson,
               format = clientModel.Format(provider = "parquet")
             )
           ),
@@ -526,14 +539,14 @@ object PropertyTest extends ZIOSpecDefault {
       schemaName: String,
       tableName: String,
       output: TableState
-  ) extends CommandResult[State] {
-    override def update(s: State): State = {
+  ) extends CommandResult[DeltaState] {
+    override def update(s: DeltaState): DeltaState = {
       val schemaObj =
         s.schema(schemaName).getOrElse(TestSchema(schemaName, Map.empty))
       val updatedSchema = schemaObj.addTable(tableName, output)
       s.copy(schemaMap = s.schemaMap.updated(schemaName, updatedSchema))
     }
-    override def ensure(s: State): TestResult = {
+    override def ensure(s: DeltaState): TestResult = {
       val tableOpt = s.schema(schemaName).flatMap(_.table(tableName))
       assertTrue(
         tableOpt.isDefined && tableOpt.exists(_.currentVersion.contains(0L))
@@ -544,8 +557,8 @@ object PropertyTest extends ZIOSpecDefault {
   object AddDataCommand {
     def gen(
         spark: SparkSession,
-        state: State
-    ): Gen[Any, Command[Any, State]] =
+        state: DeltaState
+    ): Gen[Any, Command[Any, DeltaState]] =
       for {
         schemaAndTable <- Gen.fromIterable(state.tablesWithSchemas.toList)
         (schema, table) = schemaAndTable
@@ -575,10 +588,10 @@ object PropertyTest extends ZIOSpecDefault {
       tablePath: String,
       data: List[Row],
       timestamp: Option[Long]
-  ) extends Command[Any, State] {
+  ) extends Command[Any, DeltaState] {
     type E = Throwable
-    type Result = CommandResult[State]
-    override def execute(): ZIO[Any, Throwable, CommandResult[State]] =
+    type Result = CommandResult[DeltaState]
+    override def execute(): ZIO[Any, Throwable, CommandResult[DeltaState]] =
       ZIO.attempt {
         val targetPath = new org.apache.hadoop.fs.Path(tablePath)
         val fs =
@@ -611,26 +624,27 @@ object PropertyTest extends ZIOSpecDefault {
           .filter(_.getName != "_SUCCESS")
           .toList
         val newFiles = filesAfter.filterNot(filesBefore.contains)
-        val newDataFile = newFiles.head
         val ts = timestamp.getOrElse(java.lang.System.currentTimeMillis())
-        val addFile = new AddFile(
-          newDataFile.toString,
-          new java.util.HashMap(),
-          fs.getFileStatus(newDataFile).getLen,
-          ts,
-          true,
-          "1",
-          new java.util.HashMap()
+        val addFiles = newFiles.map(newDataFile =>
+          new AddFile(
+            newDataFile.toString,
+            new java.util.HashMap(),
+            fs.getFileStatus(newDataFile).getLen,
+            ts,
+            true,
+            "1",
+            new java.util.HashMap()
+          )
         )
         val transaction = deltaLog.startTransaction()
         val commitResult = transaction.commit(
-          java.util.Arrays.asList(addFile),
+          java.util.Arrays.asList(addFiles: _*),
           new Operation(Operation.Name.MANUAL_UPDATE),
           s"Added data at $ts"
         )
         // Create a commit representing this data addition.
         val commit = Commit(
-          actions = Seq(
+          actions = addFiles.map(addFile =>
             clientModel.AddFile(
               url = addFile.getPath,
               id = "SOME_ID",
@@ -651,24 +665,22 @@ object PropertyTest extends ZIOSpecDefault {
   final case class AddDataCommandResult(
       table: Table,
       commit: Commit
-  ) extends CommandResult[State] {
-    override def update(s: State): State = {
+  ) extends CommandResult[DeltaState] {
+    override def update(s: DeltaState): DeltaState = {
       val schemaObj = s.schema(table.schema).get
       val tbl = schemaObj.table(table.name).get
       // Use the convenience method to add the commit to the table.
       val updTbl = tbl.addCommit(commit)
-      val updatedSchema =
-        schemaObj.copy(tables = schemaObj.tables + (table.name -> updTbl))
-      s.copy(schemaMap = s.schemaMap.updated(s.defaultSchemaId, updatedSchema))
+      s.addTable(table.schema, table.name, updTbl)
     }
-    override def ensure(s: State): TestResult = {
+    override def ensure(s: DeltaState): TestResult = {
       val tableOpt = s.table(table.schema, table.name)
       assertTrue(tableOpt.isDefined)
       // Collect the single file action that we generated.
       val expected = commit.actions.head.asInstanceOf[clientModel.AddFile]
       // In our TableState replay (in both getFiles and getCDFFiles),
       // legacy AddFile actions are converted into AddFileForCDF.
-      val dtf = tableOpt.get.cdfChanges
+      val dtf = tableOpt.get.getCDFFiles()
       // Combine both kinds from the replay.
       val actualFiles = dtf.addFiles ++ dtf.cdfFiles
       // We check that at least one file exists with matching common fields.
@@ -703,8 +715,8 @@ object PropertyTest extends ZIOSpecDefault {
   object ReadTableCommand {
     def gen(
         client: DeltaSharingClient,
-        state: State
-    ): Gen[Any, Command[Any, State]] =
+        state: DeltaState
+    ): Gen[Any, Command[Any, DeltaState]] =
       for {
         schemaAndTable <- Gen.fromIterable(state.tablesWithSchemas.toList)
         (schema, table) = schemaAndTable
@@ -742,10 +754,10 @@ object PropertyTest extends ZIOSpecDefault {
       endingVersion: Option[Long],
       startingTimestamp: Option[String],
       endingTimestamp: Option[String]
-  ) extends Command[Any, State] {
+  ) extends Command[Any, DeltaState] {
     type E = Throwable
-    type Result = CommandResult[State]
-    override def execute(): ZIO[Any, Throwable, CommandResult[State]] =
+    type Result = CommandResult[DeltaState]
+    override def execute(): ZIO[Any, Throwable, CommandResult[DeltaState]] =
       ZIO.attempt {
         val tbl = Table(name = table, schema = schema, share = share)
         val files =
@@ -797,15 +809,21 @@ object PropertyTest extends ZIOSpecDefault {
       endingVersion: Option[Long],
       startingTimestamp: Option[String],
       endingTimestamp: Option[String]
-  ) extends CommandResult[State] {
-    override def update(s: State): State = s
-    override def ensure(s: State): TestResult = {
+  ) extends CommandResult[DeltaState] {
+    override def update(s: DeltaState): DeltaState = s
+    override def ensure(s: DeltaState): TestResult = {
       val tableOpt = s.table(schema, table)
       assertTrue(tableOpt.exists(_.currentVersion.isDefined)) &&
       assertTrue(tableOpt.isDefined) && {
-        val normalizedTable = dummyNonComparableFields(tableOpt.get.cdfChanges)
-        val normalizedOutput = dummyNonComparableFields(output)
-        assertTrue(normalizedTable == normalizedOutput)
+        val memoryDeltaFiles = dummyNonComparableFields(tableOpt.get.getCDFFiles(startingVersion, endingVersion, startingTimestamp, endingTimestamp, includeHistoricalMetadata = false))
+        val apiDeltaFiles = dummyNonComparableFields(output)
+        val diff = deltaTableFilesDiffer.diff(memoryDeltaFiles, apiDeltaFiles)
+        val diffString = DiffResultPrinter.consoleOutput(diff, 2).toString()
+        if (!diff.isOk) {
+          println(diffString)
+          ()
+        }
+        assertTrue(diff.isOk || diffString.isEmpty)
       } &&
       assertTrue(
         endingVersion.forall(v => tableOpt.get.currentVersion.contains(v))
@@ -897,7 +915,7 @@ object PropertyTest extends ZIOSpecDefault {
       testServerEnv <- ZIO.service[DeltaServerEnvironment]
       testServer <- ZIO.service[TestServerConfig]
       client = DeltaSharingRestClient(testServer.profileFile.toString)
-      commandsGen = { state: State =>
+      commandsGen = { state: DeltaState =>
         List(
           CreateManagedTableCommand.gen(
             testTables.basePath,
@@ -909,22 +927,22 @@ object PropertyTest extends ZIOSpecDefault {
         )
       }
       result <- checkN(10)(
-        Stateful.genActions(State.empty, commandsGen, numSteps = 10)
+        Stateful.genActions(DeltaState.empty, commandsGen, numSteps = 10)
       )(steps =>
-        ZIO.attempt(
-          testTables.basePath
-            .getFileSystem(hadoopConf)
-            .delete(testTables.basePath, true)
-        ) *> ZIO.attempt(
-          testTables.basePath
-            .getFileSystem(hadoopConf)
-            .mkdirs(testTables.basePath)
-        ) *> ZIO.succeed(
-          testServerEnv.serverConfig.shares.get(0).schemas.clear()
-        )
-          *> ZIO
-            .succeed(Stateful.allStepsSuccessful(steps))
-            .debug("Test finished")
+        ZIO
+          .succeed(Stateful.allStepsSuccessful(steps))
+          .debug("Test finished")
+          <* ZIO.attempt(
+            testTables.basePath
+              .getFileSystem(hadoopConf)
+              .delete(testTables.basePath, true)
+          ) <* ZIO.attempt(
+            testTables.basePath
+              .getFileSystem(hadoopConf)
+              .mkdirs(testTables.basePath)
+          ) <* ZIO.succeed(
+            testServerEnv.serverConfig.shares.get(0).schemas.clear()
+          )
       )
     } yield result
   }).provideSomeLayer(overallLayer.fresh)
