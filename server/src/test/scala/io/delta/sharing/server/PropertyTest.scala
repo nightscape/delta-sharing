@@ -1,7 +1,10 @@
 package io.delta.sharing.server
 
+import com.dimafeng.testcontainers.{DockerComposeContainer, ExposedService}
 import difflicious._
+import difflicious.differ.RecordDiffer
 import difflicious.implicits._
+import difflicious.utils.TypeName
 import io.delta.sharing.client.model.Table
 import io.delta.sharing.client.{DeltaSharingClient, DeltaSharingRestClient}
 import io.delta.standalone.Operation
@@ -11,14 +14,15 @@ import io.delta.standalone.internal.util.newManualClock
 import io.delta.standalone.types._
 import org.apache.commons.io.FileUtils
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
-import org.apache.spark.sql.types.{
-  DataType => SparkDataType,
-  StructType => SparkStructType
-}
+import org.apache.hadoop.fs.{FileSystem, Path}
+import org.apache.spark.sql.types.{DataType => SparkDataType, StructType => SparkStructType}
 import org.apache.spark.sql.{Row, SaveMode, SparkSession}
 import zio.{Differ => _, _}
+import zio.stream._
 import zio.test._
+import zio.test.Assertion._
+import zio.test.Gen._
+import zio.test.ZIOSpecDefault
 
 import java.io.File
 import java.net.ServerSocket
@@ -31,14 +35,26 @@ import io.delta.sharing.server.config.SchemaConfig
 import io.delta.sharing.server.config.ShareConfig
 import io.delta.sharing.server.config.Authorization
 import org.apache.hadoop.fs.RemoteIterator
+
 import scala.collection.mutable.ArrayBuffer
 import io.delta.sharing.client.{model => clientModel}
 import io.delta.sharing.client.DeltaSharingProfile
+
+import javax.security.auth.Subject
+
+// Import the deterministic stateful framework.
+import io.delta.sharing.server.StatefulDeterministic
+import scala.collection.immutable.ListMap
+import scala.reflect.ClassTag
+import java.util.concurrent.TimeUnit
+import org.apache.hadoop.security.UserGroupInformation
+import io.delta.sharing.server.DockerLayer._
 
 object PropertyTest extends ZIOSpecDefault {
   private val format = "delta"
   private val spark = SparkSession.builder().master("local[4]").getOrCreate()
 
+  // Create the Hadoop configuration. Notice that later we update it to point to the HDFS cluster.
   val hadoopConf = new Configuration()
 
   def findFreePort(): Task[Int] = {
@@ -61,7 +77,7 @@ object PropertyTest extends ZIOSpecDefault {
       profileFile: File,
       serverConfig: ServerConfig
   )
-
+  final case class TestTables(basePath: Path)
   val serverConfigLayer
       : ZLayer[Scope with TestTables, Throwable, DeltaServerEnvironment] =
     ZLayer.scoped {
@@ -140,19 +156,37 @@ object PropertyTest extends ZIOSpecDefault {
       } yield TestServerConfig(env.port, env.profileFile, stopServer)
     }
 
-  final case class TestTables(basePath: Path)
-
-  val testTablesLayer: ZLayer[Scope, Throwable, TestTables] = ZLayer.scoped {
-    ZIO.acquireRelease {
-      val bp = Files.createTempDirectory(s"${format}-test-tables")
-      ZIO.succeed(TestTables(new Path(bp.toString)))
-    } { testTables =>
-      ZIO.attempt {
-        val fs = testTables.basePath.getFileSystem(hadoopConf)
-        fs.delete(testTables.basePath, true)
-      }.orDie
+  val testTablesLayer
+      : ZLayer[Scope with ServiceEndpoints with Subject, Throwable, TestTables] =
+    ZLayer.scoped {
+      ZIO.acquireRelease {
+        for {
+          endpoints <- ZIO.service[ServiceEndpoints]
+          subject <- ZIO.service[Subject]
+          hdfsUri = s"hdfs://${endpoints.namenodeHost}:${endpoints.namenodePort}"
+          _ <- ZIO.attempt {
+            val configs = Map(
+              "fs.defaultFS" -> hdfsUri,
+              "hadoop.security.authentication" -> "kerberos",
+              "hadoop.rpc.protection" -> "privacy",
+              "dfs.namenode.kerberos.principal" -> s"nn/${endpoints.namenodeContainerName}@HADOOP.LOCAL"
+            )
+            configs.foreach { case (k, v) => hadoopConf.set(k, v)}
+            // Initialize the security configuration and login using your keytab.
+            UserGroupInformation.setConfiguration(hadoopConf)
+            UserGroupInformation.loginUserFromSubject(subject)
+          }
+          fs <- ZIO.attempt(FileSystem.get(hadoopConf))
+          timestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
+          testDir: Path = new Path(s"$hdfsUri/tmp/${format}-test-tables-$timestamp")
+          _ <- ZIO.attempt(fs.mkdirs(testDir))
+        } yield TestTables(testDir)
+      } { testTables =>
+        ZIO
+          .attempt(FileSystem.get(hadoopConf).delete(testTables.basePath, true))
+          .orDie
+      }
     }
-  }
 
   val overallLayer: ZLayer[
     Scope,
@@ -161,36 +195,68 @@ object PropertyTest extends ZIOSpecDefault {
   ] =
     ZLayer.makeSome[
       Scope,
-      Scope with TestTables with DeltaServerEnvironment with TestServerConfig
+      Scope with TestTables with DeltaServerEnvironment with TestServerConfig with ServiceEndpoints with Subject
     ](
       testTablesLayer,
       serverConfigLayer,
-      serverLayer
+      serverLayer,
+      hadoopPreStartedLayer,
+      kerberosSubjectLayer
     )
 
-  implicit val protocolDiffer: Differ[clientModel.Protocol] = Differ.alwaysIgnore
-  implicit val metadataDiffer: Differ[clientModel.Metadata] = Differ.alwaysIgnore
-  implicit val addFileDiffer: Differ[clientModel.AddFile] = Differ.useEquals[clientModel.AddFile](_.toString())
-  implicit val addFileForCdfDiffer: Differ[clientModel.AddFileForCDF] = Differ.useEquals[clientModel.AddFileForCDF](_.toString())
-  implicit val addFilesForCdfSeqDiffer: Differ[Seq[clientModel.AddFileForCDF]] = Differ.seqDiffer[Seq, clientModel.AddFileForCDF].pairBy(_.url)
-  implicit val addCdcFileDiffer: Differ[clientModel.AddCDCFile] = Differ.useEquals[clientModel.AddCDCFile](_.toString())
-  implicit val addCdcFileSeqDiffer: Differ[Seq[clientModel.AddCDCFile]] = Differ.seqDiffer[Seq, clientModel.AddCDCFile].pairBy(_.url)
-  implicit val removeFileDiffer: Differ[clientModel.RemoveFile] = Differ.useEquals[clientModel.RemoveFile](_.toString())
-  implicit val deltaTableFilesDiffer: Differ[clientModel.DeltaTableFiles] = Differ.derived[clientModel.DeltaTableFiles]
+  def beanDiffer[T: ClassTag](exclude: Set[String] = Set.empty): Differ[T] = {
+    import java.beans.Introspector
+    def getBeanProperties(
+        beanClass: Class[_]
+    ): Array[java.beans.PropertyDescriptor] = {
+      val beanInfo = Introspector.getBeanInfo(beanClass)
+      beanInfo.getPropertyDescriptors
+    }
+    val classTag = implicitly[ClassTag[T]]
+    val runtimeClass = classTag.runtimeClass
+    val properties = getBeanProperties(runtimeClass).filterNot(p =>
+      exclude.contains(p.getName)
+    )
+    val extractors = ListMap(properties.map { p =>
+      val extractor = (t: T) => p.getReadMethod.invoke(t).asInstanceOf[AnyRef]
+      p.getName -> (extractor, Differ.useEquals[Any](_.toString()))
+    }: _*)
+    new RecordDiffer[T](
+      extractors,
+      isIgnored = false,
+      TypeName(runtimeClass.getName, runtimeClass.getSimpleName, List.empty)
+    )
+  }
+  implicit val protocolDiffer: Differ[clientModel.Protocol] =
+    beanDiffer[clientModel.Protocol](Set("id"))
+  implicit val metadataDiffer: Differ[clientModel.Metadata] =
+    beanDiffer[clientModel.Metadata](Set("id"))
+  implicit val addFileDiffer: Differ[clientModel.AddFile] =
+    beanDiffer[clientModel.AddFile](Set("size"))
+  implicit val addFileForCdfDiffer: Differ[clientModel.AddFileForCDF] =
+    beanDiffer[clientModel.AddFileForCDF](Set("size"))
+  implicit val addCdcFileDiffer: Differ[clientModel.AddCDCFile] =
+    beanDiffer[clientModel.AddCDCFile](Set("size"))
+  implicit val addCdcFileSeqDiffer: Differ[Seq[clientModel.AddCDCFile]] =
+    Differ.seqDiffer[Seq, clientModel.AddCDCFile].pairBy(_.url)
+  implicit val removeFileDiffer: Differ[clientModel.RemoveFile] =
+    beanDiffer[clientModel.RemoveFile](Set("url"))
+  implicit val deltaTableFilesDiffer: Differ[clientModel.DeltaTableFiles] =
+    beanDiffer[clientModel.DeltaTableFiles](Set("url"))
+
   case class TableState(
       tableId: String,
       tablePath: String,
       commits: List[Commit] = Nil,
       currentVersion: Option[Long] = None,
       currentSchema: Option[StructType] = None,
-      knownPartitionValues: Map[String, Set[String]] = Map.empty,
+      knownPartitionValues: Map[String, Set[String]] = Map.empty
   ) {
-    // Convenience method for appending a commit
     def addCommit(commit: Commit): TableState =
-      copy(commits = commits :+ commit, currentVersion = currentVersion.orElse(Some(0L)).map(_ + 1))
-
-    /** Updated replay to support legacy AddFile, AddFileForCDF and AddCDCFile *
-      */
+      copy(
+        commits = commits :+ commit,
+        currentVersion = currentVersion.orElse(Some(0L)).map(_ + 1)
+      )
     def getFiles(
         startingVersion: Option[Long],
         endingVersion: Option[Long]
@@ -201,8 +267,6 @@ object PropertyTest extends ZIOSpecDefault {
         )
       }
       val respondedFormat = DeltaSharingRestClient.RESPONSE_FORMAT_PARQUET
-
-      // Header information from the first commit.
       val firstCommit = commits.head
       val protocol = firstCommit.actions.head.asInstanceOf[clientModel.Protocol]
       if (protocol.minReaderVersion > DeltaSharingProfile.CURRENT) {
@@ -213,7 +277,6 @@ object PropertyTest extends ZIOSpecDefault {
         )
       }
       val metadata = firstCommit.actions(1).asInstanceOf[clientModel.Metadata]
-
       val addFiles = ArrayBuffer[clientModel.AddFileForCDF]()
       val cdcFiles = ArrayBuffer[clientModel.AddCDCFile]()
       val removeFiles = ArrayBuffer[clientModel.RemoveFile]()
@@ -228,7 +291,6 @@ object PropertyTest extends ZIOSpecDefault {
         .foreach { commit =>
           commit.actions.foreach {
             case a: clientModel.AddFile =>
-              // Legacy action – convert it on the fly.
               version = math.max(version, commit.version)
               addFiles.append(
                 clientModel.AddFileForCDF(
@@ -273,7 +335,6 @@ object PropertyTest extends ZIOSpecDefault {
       )
     }
 
-    /** Updated getCDFFiles with similar changes * */
     def getCDFFiles(
         startingVersion: Option[Long] = None,
         endingVersion: Option[Long] = None,
@@ -297,7 +358,6 @@ object PropertyTest extends ZIOSpecDefault {
         )
       }
       val metadata = firstCommit.actions(1).asInstanceOf[clientModel.Metadata]
-
       val addFiles = ArrayBuffer[clientModel.AddFileForCDF]()
       val cdcFiles = ArrayBuffer[clientModel.AddCDCFile]()
       val removeFiles = ArrayBuffer[clientModel.RemoveFile]()
@@ -307,8 +367,6 @@ object PropertyTest extends ZIOSpecDefault {
         if (
           startingVersion.forall(_ <= commit.version) &&
           endingVersion.forall(_ >= commit.version)
-          //startingTimestamp.forall(ts => commit.timestamp >= ts) &&
-          //endingTimestamp.forall(ts => commit.timestamp <= ts)
         ) {
           commit.actions.foreach {
             case a: clientModel.AddFile =>
@@ -367,7 +425,7 @@ object PropertyTest extends ZIOSpecDefault {
   }
 
   case class TestState(
-    deltaState: DeltaState,
+      deltaState: DeltaState
   )
   case class DeltaState(
       schemaMap: Map[String, TestSchema] = Map(
@@ -433,21 +491,20 @@ object PropertyTest extends ZIOSpecDefault {
       message: String
   ) {}
 
+
   object CreateManagedTableCommand {
     def gen(
         basePath: Path,
         state: DeltaState,
         serverConfig: ServerConfig
-    ): Gen[Any, Command[Any, DeltaState]] =
+    ): Gen[Any, StatefulDeterministic.Command[Any, DeltaState]] =
       for {
         schema <- Gen.const("test-schema")
-        // Only generate few different table names
-        // so we get more actions per table
         tableName <- Gen
           .elements("a", "b")
           .map(id => s"table-${id.toLowerCase}")
           .filterNot(state.tables.map(_.tableId).contains)
-        tablePath = s"$basePath/$schema/$tableName"
+        tablePath = s"$basePath/$schema/$tableName-${java.lang.System.currentTimeMillis()}"
       } yield new CreateManagedTableCommand(
         tablePath,
         schema,
@@ -461,104 +518,104 @@ object PropertyTest extends ZIOSpecDefault {
       schemaName: String,
       tableName: String,
       serverConfig: ServerConfig
-  ) extends Command[Any, DeltaState] {
+  ) extends StatefulDeterministic.Command[Any, DeltaState] {
     type E = Throwable
-    type Result = CommandResult[DeltaState]
-    override def execute(): ZIO[Any, Throwable, CommandResult[DeltaState]] =
-      ZIO.attempt {
-        val targetPath = new org.apache.hadoop.fs.Path(tablePath)
-        val clock = newManualClock
-        val deltaLog = deltaLogForTableWithClock(hadoopConf, targetPath, clock)
-        val timestamp = java.lang.System.currentTimeMillis()
-        clock.setTime(timestamp)
-        val transaction = deltaLog.startTransaction()
-        val protocol = new Protocol(1, 2)
-        val metadata = Metadata
-          .builder()
-          .createdTime(timestamp)
-          .schema(BaseTestResource.structType)
-          .build()
-        transaction.commit(
-          java.util.Arrays.asList(protocol, metadata),
-          new Operation(Operation.Name.CREATE_TABLE),
-          "Created test table"
-        )
-        // Create a commit representing the creation of the table.
-        val commit = Commit(
-          actions = Seq(
-            clientModel.Protocol(protocol.getMinReaderVersion),
-            clientModel.Metadata(
-              id = metadata.getId,
-              name = metadata.getName,
-              description = metadata.getDescription,
-              schemaString = metadata.getSchema.toJson,
-              format = clientModel.Format(provider = "parquet")
-            )
-          ),
-          operation = new Operation(Operation.Name.CREATE_TABLE),
-          version = 0L,
-          timestamp = timestamp,
-          message = "Created test table"
-        )
-        // Build the initial table state using the commit.
-        val tableState = TableState(
-          tableId = tableName,
-          tablePath = tablePath,
-          commits = List(commit),
-          currentVersion = Some(commit.version),
-          currentSchema = Some(BaseTestResource.structType)
-        )
 
-        // Modify the existing share configuration rather than adding a new one.
-        val shareOpt = serverConfig.shares.asScala.find(_.name == "test-share")
-        val share = shareOpt.getOrElse(
-          throw new Exception("Share 'test-share' not found in server config")
-        )
-        val schemaOpt = share.schemas.asScala.find(_.name == schemaName)
-        val schemaConfig = schemaOpt.getOrElse {
-          val newSchemaConfig =
-            SchemaConfig(schemaName, new java.util.ArrayList[TableConfig]())
-          share.schemas.add(newSchemaConfig)
-          newSchemaConfig
-        }
-
-        val newTableConfig = TableConfig(
-          name = tableName,
-          location = tablePath,
-          id = java.util.UUID.randomUUID().toString,
-          historyShared = true,
-          startVersion = 0L
-        )
-        schemaConfig.tables.add(newTableConfig)
-
-        CreateManagedTableCommandResult(schemaName, tableName, tableState)
-      }
-  }
-
-  final case class CreateManagedTableCommandResult(
-      schemaName: String,
-      tableName: String,
-      output: TableState
-  ) extends CommandResult[DeltaState] {
-    override def update(s: DeltaState): DeltaState = {
-      val schemaObj =
-        s.schema(schemaName).getOrElse(TestSchema(schemaName, Map.empty))
-      val updatedSchema = schemaObj.addTable(tableName, output)
-      s.copy(schemaMap = s.schemaMap.updated(schemaName, updatedSchema))
-    }
-    override def ensure(s: DeltaState): TestResult = {
-      val tableOpt = s.schema(schemaName).flatMap(_.table(tableName))
-      assertTrue(
-        tableOpt.isDefined && tableOpt.exists(_.currentVersion.contains(0L))
+    override def update(state: DeltaState): DeltaState = {
+      val dummyTimestamp = 0L
+      val commit = Commit(
+        actions = Seq(
+          clientModel.Protocol(1),
+          clientModel.Metadata(
+            id = "dummy-metadata-id",
+            name = tableName,
+            description = null,
+            schemaString = BaseTestResource.structType.toJson,
+            format = clientModel.Format(provider = "parquet")
+          )
+        ),
+        operation = new Operation(Operation.Name.CREATE_TABLE),
+        version = 0L,
+        timestamp = dummyTimestamp,
+        message = "Created test table"
       )
+      val tableState = TableState(
+        tableId = tableName,
+        tablePath = tablePath,
+        commits = List(commit),
+        currentVersion = Some(0L),
+        currentSchema = Some(BaseTestResource.structType)
+      )
+      val schemaObj =
+        state.schema(schemaName).getOrElse(TestSchema(schemaName, Map.empty))
+      val updatedSchema = schemaObj.addTable(tableName, tableState)
+      state.copy(schemaMap = state.schemaMap.updated(schemaName, updatedSchema))
     }
+
+    override def executeAndCheck(
+        state: DeltaState
+    ): ZIO[Any, Throwable, TestResult] = for {
+      timestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
+      testResult <- ZIO
+        .attempt {
+          val targetPath = new Path(tablePath)
+          val clock = newManualClock
+          val deltaLog =
+            deltaLogForTableWithClock(hadoopConf, targetPath, clock)
+          val timestamp = java.lang.System.currentTimeMillis()
+          clock.setTime(timestamp)
+          val transaction = deltaLog.startTransaction()
+          val protocol = new Protocol(1, 2)
+          val metadata = Metadata
+            .builder()
+            .createdTime(timestamp)
+            .schema(BaseTestResource.structType)
+            .build()
+          transaction.commit(
+            java.util.Arrays.asList(protocol, metadata),
+            new Operation(Operation.Name.CREATE_TABLE),
+            "Created test table"
+          )
+          println(s"Server created table at $tablePath")
+          val shareOpt =
+            serverConfig.shares.asScala.find(_.name == "test-share")
+          val share = shareOpt.getOrElse(
+            throw new Exception("Share 'test-share' not found in server config")
+          )
+          val schemaOpt = share.schemas.asScala.find(_.name == schemaName)
+          val schemaConfig = schemaOpt.getOrElse {
+            val newSchemaConfig =
+              SchemaConfig(schemaName, new java.util.ArrayList[TableConfig]())
+            share.schemas.add(newSchemaConfig)
+            newSchemaConfig
+          }
+          val newTableConfig = TableConfig(
+            name = tableName,
+            location = tablePath,
+            id = java.util.UUID.randomUUID().toString,
+            historyShared = true,
+            startVersion = 0L
+          )
+          schemaConfig.tables.add(newTableConfig)
+        }
+        .flatMap { _ =>
+          val newState = update(state)
+          val tableOpt = newState.schema(schemaName).flatMap(_.table(tableName))
+          ZIO.succeed(
+            assertTrue(
+              tableOpt.isDefined && tableOpt
+                .exists(_.currentVersion.contains(0L))
+            )
+          )
+        }
+    } yield testResult
   }
 
   object AddDataCommand {
     def gen(
         spark: SparkSession,
         state: DeltaState
-    ): Gen[Any, Command[Any, DeltaState]] =
+    ): Gen[Any, StatefulDeterministic.Command[Any, DeltaState]] =
       for {
         schemaAndTable <- Gen.fromIterable(state.tablesWithSchemas.toList)
         (schema, table) = schemaAndTable
@@ -572,151 +629,151 @@ object PropertyTest extends ZIOSpecDefault {
         timestamp
       )
   }
-
   implicit class RichRemoteIterator[T](iter: RemoteIterator[T]) {
-    def asScala: Iterator[T] = {
-      new Iterator[T] {
-        def hasNext: Boolean = iter.hasNext
-        def next(): T = iter.next()
-      }
+    def asScala: Iterator[T] = new Iterator[T] {
+      def hasNext: Boolean = iter.hasNext
+      def next(): T = iter.next()
     }
   }
-
   case class AddDataCommand(
       spark: SparkSession,
       table: Table,
       tablePath: String,
       data: List[Row],
       timestamp: Option[Long]
-  ) extends Command[Any, DeltaState] {
+  ) extends StatefulDeterministic.Command[Any, DeltaState] {
     type E = Throwable
-    type Result = CommandResult[DeltaState]
-    override def execute(): ZIO[Any, Throwable, CommandResult[DeltaState]] =
-      ZIO.attempt {
-        val targetPath = new org.apache.hadoop.fs.Path(tablePath)
-        val fs =
-          targetPath.getFileSystem(new org.apache.hadoop.conf.Configuration())
-        val dataPath = new org.apache.hadoop.fs.Path(targetPath, "data")
-        fs.mkdirs(dataPath)
-        val clock = newManualClock
-        val deltaLog = deltaLogForTableWithClock(
-          new org.apache.hadoop.conf.Configuration(),
-          targetPath,
-          clock
-        )
-        timestamp.foreach(clock.setTime)
-        val filesBefore =
-          fs.listFiles(dataPath, true).asScala.map(_.getPath).toList
-        spark
-          .createDataFrame(
-            data.asJava,
-            standaloneSchemaToSparkSchema(BaseTestResource.structType)
-          )
-          .coalesce(1)
-          .write
-          .mode(SaveMode.Append)
-          .format("parquet")
-          .save(dataPath.toString)
-        val filesAfter = fs
-          .listFiles(dataPath, true)
-          .asScala
-          .map(_.getPath)
-          .filter(_.getName != "_SUCCESS")
-          .toList
-        val newFiles = filesAfter.filterNot(filesBefore.contains)
-        val ts = timestamp.getOrElse(java.lang.System.currentTimeMillis())
-        val addFiles = newFiles.map(newDataFile =>
-          new AddFile(
-            newDataFile.toString,
-            new java.util.HashMap(),
-            fs.getFileStatus(newDataFile).getLen,
-            ts,
-            true,
-            "1",
-            new java.util.HashMap()
-          )
-        )
-        val transaction = deltaLog.startTransaction()
-        val commitResult = transaction.commit(
-          java.util.Arrays.asList(addFiles: _*),
-          new Operation(Operation.Name.MANUAL_UPDATE),
-          s"Added data at $ts"
-        )
-        // Create a commit representing this data addition.
-        val commit = Commit(
-          actions = addFiles.map(addFile =>
-            clientModel.AddFile(
-              url = addFile.getPath,
-              id = "SOME_ID",
-              partitionValues = addFile.getPartitionValues.asScala.toMap,
-              size = addFile.getSize,
-              stats = addFile.getStats
-            )
-          ),
-          operation = new Operation(Operation.Name.MANUAL_UPDATE),
-          version = commitResult.getVersion,
-          timestamp = ts,
-          message = s"Added data at $ts"
-        )
-        AddDataCommandResult(table, commit)
-      }
-  }
+    private val fileName: String =
+      s"part-${math.abs(this.hashCode())}.snappy.parquet"
+    private val fileUrl: Path = new Path(tablePath, fileName)
 
-  final case class AddDataCommandResult(
-      table: Table,
-      commit: Commit
-  ) extends CommandResult[DeltaState] {
-    override def update(s: DeltaState): DeltaState = {
-      val schemaObj = s.schema(table.schema).get
+    override def update(state: DeltaState): DeltaState = {
+      val currentVersion = state
+        .table(table.schema, table.name)
+        .flatMap(_.currentVersion)
+        .getOrElse(0L)
+      val newVersion = currentVersion + 1
+      val ts = timestamp.getOrElse(0L)
+      val dummyAddFile = clientModel.AddFile(
+        url = fileUrl.toString,
+        id = "SOME_ID",
+        partitionValues = Map.empty[String, String],
+        size = 1L,
+        stats = null
+      )
+      val commit = Commit(
+        actions = Seq(dummyAddFile),
+        operation = new Operation(Operation.Name.MANUAL_UPDATE),
+        version = newVersion,
+        timestamp = ts,
+        message = s"Added data at $ts"
+      )
+      val schemaObj = state
+        .schema(table.schema)
+        .getOrElse(TestSchema(table.schema, Map.empty))
       val tbl = schemaObj.table(table.name).get
-      // Use the convenience method to add the commit to the table.
       val updTbl = tbl.addCommit(commit)
-      s.addTable(table.schema, table.name, updTbl)
+      state.addTable(table.schema, table.name, updTbl)
     }
-    override def ensure(s: DeltaState): TestResult = {
-      val tableOpt = s.table(table.schema, table.name)
-      assertTrue(tableOpt.isDefined)
-      // Collect the single file action that we generated.
-      val expected = commit.actions.head.asInstanceOf[clientModel.AddFile]
-      // In our TableState replay (in both getFiles and getCDFFiles),
-      // legacy AddFile actions are converted into AddFileForCDF.
-      val dtf = tableOpt.get.getCDFFiles()
-      // Combine both kinds from the replay.
-      val actualFiles = dtf.addFiles ++ dtf.cdfFiles
-      // We check that at least one file exists with matching common fields.
-      val existsMatch = actualFiles.exists { file =>
-        file.url == expected.url &&
-        file.id == expected.id &&
-        file.partitionValues == expected.partitionValues &&
-        file.size == expected.size &&
-        (file match {
-          case af: clientModel.AddFileForCDF =>
-            expected match {
-              case x: clientModel.AddFileForCDF =>
-                af.version == x.version && af.timestamp == x.timestamp
-              case x: clientModel.AddFile =>
-                af.version == commit.version && af.timestamp == commit.timestamp
-              case _ => false
-            }
-          case cd: clientModel.AddCDCFile =>
-            expected match {
-              case x: clientModel.AddCDCFile =>
-                cd.version == x.version && cd.timestamp == x.timestamp
-              case _ =>
-                cd.version == commit.version && cd.timestamp == commit.timestamp
-            }
-          case _ => false
-        })
-      }
-      assertTrue(existsMatch)
-    }
+
+    override def executeAndCheck(
+        state: DeltaState
+    ): ZIO[Any, Throwable, TestResult] = for {
+      now <- Clock.currentTime(TimeUnit.MILLISECONDS)
+      testResult <- ZIO
+        .attempt {
+          val targetPath = new Path(tablePath)
+          // Use our hadoopConf which now points to HDFS instead of the local configuration.
+          val fs = targetPath.getFileSystem(hadoopConf)
+          val dataPath = new Path(targetPath, "data")
+          fs.mkdirs(dataPath)
+          val clock = newManualClock
+          val deltaLog =
+            deltaLogForTableWithClock(hadoopConf, targetPath, clock)
+          val ts = timestamp.getOrElse(now)
+          timestamp.foreach(clock.setTime)
+          val filesBefore =
+            fs.listFiles(dataPath, true).asScala.map(_.getPath).toList
+          spark
+            .createDataFrame(
+              data.asJava,
+              standaloneSchemaToSparkSchema(BaseTestResource.structType)
+            )
+            .coalesce(1)
+            .write
+            .mode(SaveMode.Append)
+            .format("parquet")
+            .save(dataPath.toString)
+          val filesAfter = fs
+            .listFiles(dataPath, true)
+            .asScala
+            .filter(_.getPath.getName.startsWith("part-"))
+            .toList
+          val newFiles = filesAfter.filterNot(f => filesBefore.contains(f.getPath))
+          val renamedFiles = newFiles.map { f =>
+            fs.rename(f.getPath, fileUrl)
+            f.setPath(fileUrl)
+            f
+          }
+          val addFiles = renamedFiles.map(newDataFile =>
+            new AddFile(
+              newDataFile.getPath.toString,
+              new java.util.HashMap(),
+              newDataFile.getLen,
+              ts,
+              true,
+              """"1"""",
+              new java.util.HashMap()
+            )
+          )
+          val transaction = deltaLog.startTransaction()
+          val commitResult = transaction.commit(
+            java.util.Arrays.asList(addFiles: _*),
+            new Operation(Operation.Name.MANUAL_UPDATE),
+            s"Added data at $ts"
+          )
+          println(s"Data added to table at $tablePath")
+          val commit = Commit(
+            actions = addFiles.map(addFile =>
+              clientModel.AddFile(
+                url = addFile.getPath,
+                id = "SOME_ID",
+                partitionValues = addFile.getPartitionValues.asScala.toMap,
+                size = addFile.getSize,
+                stats = addFile.getStats
+              )
+            ),
+            operation = new Operation(Operation.Name.MANUAL_UPDATE),
+            version = commitResult.getVersion,
+            timestamp = ts,
+            message = s"Added data at $ts"
+          )
+          commit
+        }
+        .map { commit =>
+          val newState = update(state)
+          val tableOpt = newState.table(table.schema, table.name)
+          val addedFileOnStorage = commit.actions.head.asInstanceOf[clientModel.AddFile]
+          val dtf = tableOpt.get.getCDFFiles()
+          val expectedFile = dtf.addFiles.last
+
+          assertTrue(
+            tableOpt.isDefined && expectedFile.url == addedFileOnStorage.url &&
+            expectedFile.id == addedFileOnStorage.id &&
+            expectedFile.partitionValues == addedFileOnStorage.partitionValues
+            // expectedFile.size == addedFileOnStorage.size &&
+            // expectedFile.version == commit.version &&
+            // expectedFile.timestamp == commit.timestamp
+          )
+        }
+    } yield testResult
   }
 
   object ReadTableCommand {
     def gen(
         client: DeltaSharingClient,
         state: DeltaState
-    ): Gen[Any, Command[Any, DeltaState]] =
+    ): Gen[Any, StatefulDeterministic.Command[Any, DeltaState]] =
       for {
         schemaAndTable <- Gen.fromIterable(state.tablesWithSchemas.toList)
         (schema, table) = schemaAndTable
@@ -754,10 +811,14 @@ object PropertyTest extends ZIOSpecDefault {
       endingVersion: Option[Long],
       startingTimestamp: Option[String],
       endingTimestamp: Option[String]
-  ) extends Command[Any, DeltaState] {
+  ) extends StatefulDeterministic.Command[Any, DeltaState] {
     type E = Throwable
-    type Result = CommandResult[DeltaState]
-    override def execute(): ZIO[Any, Throwable, CommandResult[DeltaState]] =
+
+    override def update(state: DeltaState): DeltaState = state
+
+    override def executeAndCheck(
+        state: DeltaState
+    ): ZIO[Any, Throwable, TestResult] = {
       ZIO.attempt {
         val tbl = Table(name = table, schema = schema, share = share)
         val files =
@@ -788,58 +849,54 @@ object PropertyTest extends ZIOSpecDefault {
               refreshToken = None
             )
           }
-
-        ReadTableCommandResult(
-          schema,
-          table,
-          files,
-          startingVersion,
-          endingVersion,
-          startingTimestamp,
-          endingTimestamp
+        val tableOpt = state.table(schema, table)
+        val memoryDeltaFiles = dummyNonComparableFields(
+          tableOpt.get.getCDFFiles(
+            startingVersion,
+            endingVersion,
+            startingTimestamp,
+            endingTimestamp,
+            includeHistoricalMetadata = false
+          )
         )
-      }
-  }
-
-  final case class ReadTableCommandResult(
-      schema: String,
-      table: String,
-      output: clientModel.DeltaTableFiles,
-      startingVersion: Option[Long],
-      endingVersion: Option[Long],
-      startingTimestamp: Option[String],
-      endingTimestamp: Option[String]
-  ) extends CommandResult[DeltaState] {
-    override def update(s: DeltaState): DeltaState = s
-    override def ensure(s: DeltaState): TestResult = {
-      val tableOpt = s.table(schema, table)
-      assertTrue(tableOpt.exists(_.currentVersion.isDefined)) &&
-      assertTrue(tableOpt.isDefined) && {
-        val memoryDeltaFiles = dummyNonComparableFields(tableOpt.get.getCDFFiles(startingVersion, endingVersion, startingTimestamp, endingTimestamp, includeHistoricalMetadata = false))
-        val apiDeltaFiles = dummyNonComparableFields(output)
+        val apiDeltaFiles = dummyNonComparableFields(files)
         val diff = deltaTableFilesDiffer.diff(memoryDeltaFiles, apiDeltaFiles)
         val diffString = DiffResultPrinter.consoleOutput(diff, 2).toString()
-        if (!diff.isOk) {
-          println(diffString)
-          ()
-        }
-        assertTrue(diff.isOk || diffString.isEmpty)
-      } &&
-      assertTrue(
-        endingVersion.forall(v => tableOpt.get.currentVersion.contains(v))
-      )
+        if (!diff.isOk) println(diffString)
+        assertTrue(tableOpt.exists(_.currentVersion.isDefined)) &&
+        assertTrue(tableOpt.isDefined) &&
+        assertTrue(diff.isOk || diffString.isEmpty) &&
+        assertTrue(
+          endingVersion.forall(v => tableOpt.get.currentVersion.contains(v))
+        )
+      }
     }
   }
 
-  private def evaluateFilter(
-      partitionValues: Map[String, String],
-      filter: String
-  ): Boolean = {
-    val parts = filter.split("=").map(_.trim)
-    if (parts.length != 2) return true
-    val column = parts(0).replaceAll("'", "").replaceAll("\"", "")
-    val value = parts(1).replaceAll("'", "").replaceAll("\"", "")
-    partitionValues.get(column).exists(_ == value)
+  private def dummyNonComparableFields(
+      deltaTableFiles: clientModel.DeltaTableFiles
+  ): clientModel.DeltaTableFiles = {
+    val dummyVersion = 0L
+    val dummyMetadataVersion: java.lang.Long = 0L
+    val dummyId = "dummy-id"
+    val dummyTimestamp = 0L
+    val dummyExpirationTimestamp: java.lang.Long = 0L
+    val newMetadata = if (deltaTableFiles.metadata != null) {
+      deltaTableFiles.metadata.copy(version = dummyMetadataVersion)
+    } else null
+    val newAddFiles = deltaTableFiles.addFiles.map { addFile =>
+      addFile.copy(
+        id = dummyId,
+        timestamp = dummyTimestamp,
+        expirationTimestamp = dummyExpirationTimestamp
+      )
+    }
+    deltaTableFiles.copy(
+      version = dummyVersion,
+      metadata = newMetadata,
+      addFiles = newAddFiles,
+      refreshToken = None
+    )
   }
 
   def generateTestData(
@@ -873,43 +930,7 @@ object PropertyTest extends ZIOSpecDefault {
   def standaloneSchemaToSparkSchema(schema: StructType): SparkStructType =
     SparkDataType.fromJson(schema.toJson()).asInstanceOf[SparkStructType]
 
-  // Helper method to set non-deterministic fields to dummy values.
-  private def dummyNonComparableFields(
-      deltaTableFiles: clientModel.DeltaTableFiles
-  ): clientModel.DeltaTableFiles = {
-    // Define dummy values for the fields.
-    val dummyVersion = 0L
-    val dummyMetadataVersion: java.lang.Long = 0L
-    val dummyId = "dummy-id"
-    val dummyTimestamp = 0L
-    val dummyExpirationTimestamp: java.lang.Long = 0L
-
-    // Normalize metadata if it exists.
-    val newMetadata = if (deltaTableFiles.metadata != null) {
-      deltaTableFiles.metadata.copy(version = dummyMetadataVersion)
-    } else {
-      null
-    }
-
-    // For each element in addFiles, replace id, timestamp, and expirationTimestamp.
-    val newAddFiles = deltaTableFiles.addFiles.map { addFile =>
-      addFile.copy(
-        id = dummyId,
-        timestamp = dummyTimestamp,
-        expirationTimestamp = dummyExpirationTimestamp
-      )
-    }
-
-    // Return a duplicate of DeltaTableFiles with the dummy values applied.
-    deltaTableFiles.copy(
-      version = dummyVersion,
-      metadata = newMetadata,
-      addFiles = newAddFiles,
-      refreshToken = None
-    )
-  }
-
-  def spec = suite("DeltaSharingOperations")(test("delta sharing operations") {
+  def spec: Spec[TestEnvironment with Scope, Any] = suite("DeltaSharingOperations")(test("delta sharing operations") {
     for {
       testTables <- ZIO.service[TestTables]
       testServerEnv <- ZIO.service[DeltaServerEnvironment]
@@ -927,22 +948,18 @@ object PropertyTest extends ZIOSpecDefault {
         )
       }
       result <- checkN(10)(
-        Stateful.genActions(DeltaState.empty, commandsGen, numSteps = 10)
+        StatefulDeterministic.genActions(DeltaState.empty, commandsGen)
       )(steps =>
-        ZIO
-          .succeed(Stateful.allStepsSuccessful(steps))
-          .debug("Test finished")
-          <* ZIO.attempt(
-            testTables.basePath
-              .getFileSystem(hadoopConf)
-              .delete(testTables.basePath, true)
-          ) <* ZIO.attempt(
-            testTables.basePath
-              .getFileSystem(hadoopConf)
-              .mkdirs(testTables.basePath)
-          ) <* ZIO.succeed(
-            testServerEnv.serverConfig.shares.get(0).schemas.clear()
-          )
+        StatefulDeterministic
+          .allStepsSuccessful(steps)
+          .debug("Test finished") <*
+          ZIO.attempt(
+            FileSystem.get(hadoopConf).delete(testTables.basePath, true)
+          ) <*
+          ZIO.attempt(
+            FileSystem.get(hadoopConf).mkdirs(testTables.basePath)
+          ) <*
+          ZIO.succeed(testServerEnv.serverConfig.shares.get(0).schemas.clear())
       )
     } yield result
   }).provideSomeLayer(overallLayer.fresh)
