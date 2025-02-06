@@ -2,6 +2,14 @@
 
 This fork introduces enhancements to the Delta Sharing server, focusing on enterprise deployment capabilities, improved testing infrastructure, and modernized build tooling.
 
+## Enhancements
+
+### HDFS Delegation Token Support
+* Enables Delta Sharing server to work with Kerberized HDFS clusters
+* Docker Examples:
+  * [examples/docker-krb5/](./examples/docker-krb5/) - Basic Kerberos setup
+* Files: [DeltaSharingService.scala](./server/src/main/scala/io/delta/sharing/server/DeltaSharingService.scala), [CloudFileSigner.scala](./server/src/main/scala/io/delta/sharing/server/common/CloudFileSigner.scala), [DeltaSharedTable.scala](./server/src/main/scala/io/delta/standalone/internal/DeltaSharedTable.scala)
+
 ## Testing Infrastructure
 
 ### Property-Based Testing Framework

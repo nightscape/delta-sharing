@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+// scalastyle:off
 package io.delta.sharing.server
 
 import java.io.{ByteArrayOutputStream, File, FileNotFoundException}
@@ -806,6 +806,19 @@ object DeltaSharingService {
   }
 
   def main(args: Array[String]): Unit = {
+    // println(sys.props.toSeq.sortBy(_._1).mkString("\n"))
+    // val conf = new org.apache.hadoop.conf.Configuration()
+    // conf.addResource(new org.apache.hadoop.fs.Path("./server/src/test/resources/core-site.xml"))
+    // //conf.addResource(new org.apache.hadoop.fs.Path("./server/src/test/resources/configs/hadoop/hdfs-site.xml"))
+    // conf.set("hadoop.security.authentication", "kerberos")
+    // conf.set("fs.defaultFS", "hdfs://localhost:8020")
+    // // Set Kerberos as the authentication method.
+    // // Optionally, you can set additional Kerberos-related properties if required
+    // //conf.set("dfs.namenode.kerberos.principal", s"nn/9280d4379405@HADOOP.LOCAL")
+    // org.apache.hadoop.security.UserGroupInformation.setConfiguration(conf)
+
+    // val ugi = org.apache.hadoop.security.UserGroupInformation.loginUserFromKeytabAndReturnUGI("tester@HADOOP.LOCAL", "/tmp/tester.keytab")
+    // println(ugi)
     val ns = parser.parseArgsOrFail(args)
     val serverConfigPath = ns.getString("config")
     val serverConf = ServerConfig.load(serverConfigPath)

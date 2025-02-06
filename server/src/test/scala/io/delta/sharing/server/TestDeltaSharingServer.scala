@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+// scalastyle:off
 package io.delta.sharing.server
 
 import java.io.File
@@ -27,6 +27,7 @@ import org.apache.hadoop.security.GroupMappingServiceProvider
 import org.apache.hadoop.security.JniBasedUnixGroupsMappingWithFallback
 import _root_.com.linecorp.armeria.server.Server
 
+// scalastyle:off
 /**
  * This is a special test class for the client projects to test end-to-end experience. It will
  * generate configs for testing and start the server.
