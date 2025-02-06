@@ -1,5 +1,6 @@
 package io.delta.sharing.server
 
+// scalastyle:off
 import difflicious._
 import difflicious.implicits._
 import io.delta.sharing.client.model.Table
@@ -55,7 +56,6 @@ object SimplePropertyTest extends ZIOSpecDefault {
       }.provide(CounterService.live.fresh)
     }
       //.@@(checksZIO(resetCounterServiceAspect))
-     ,
   ) @@ sequential
 
   trait CounterService {

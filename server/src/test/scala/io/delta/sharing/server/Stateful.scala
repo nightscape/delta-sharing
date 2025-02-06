@@ -1,5 +1,5 @@
 package io.delta.sharing.server
-
+// scalastyle:off
 import zio._
 import zio.stream._
 import zio.test._

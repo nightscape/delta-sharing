@@ -17,4 +17,9 @@
         <name>fs.azure.account.key.deltasharingtest.dfs.core.windows.net</name>
         <value>${azure.account.key}</value>
     </property>
+
+    <property>
+        <name>ipc.maximum.response.length</name>
+        <value>518000000</value>
+    </property>
 </configuration>

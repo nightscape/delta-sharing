@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+// scalastyle:off
 package io.delta.sharing.kernel.internal
 
 import java.io.FileNotFoundException
@@ -23,14 +23,12 @@ import java.sql.Timestamp
 import java.time.OffsetDateTime
 import java.time.format.{DateTimeFormatter, DateTimeParseException}
 import java.util.Base64
-
 import scala.collection.JavaConverters._
 import scala.util.control.NonFatal
-
 import com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem
 import com.google.common.hash.Hashing
 import io.delta.kernel.Table
-import io.delta.kernel.data.{ColumnarBatch, ColumnVector, FilteredColumnarBatch}
+import io.delta.kernel.data.{ColumnVector, ColumnarBatch, FilteredColumnarBatch}
 import io.delta.kernel.defaults.engine.DefaultEngine
 import io.delta.kernel.engine.Engine
 import io.delta.kernel.exceptions.{KernelException, TableNotFoundException}
@@ -44,15 +42,18 @@ import org.apache.hadoop.fs.{LocalFileSystem, Path}
 import org.apache.hadoop.fs.azure.NativeAzureFileSystem
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem
 import org.apache.hadoop.fs.s3a.S3AFileSystem
+import org.apache.hadoop.hdfs.DistributedFileSystem
+import org.apache.hadoop.security.UserGroupInformation
 import org.apache.spark.sql.types.{DataType, MetadataBuilder, StructType}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
-
 import io.delta.sharing.server.{DeltaSharedTableProtocol, DeltaSharingIllegalArgumentException, DeltaSharingUnsupportedOperationException, ErrorStrings, QueryResult}
 import io.delta.sharing.server.common.{AbfsFileSigner, GCSFileSigner, JsonUtils, LocalFileSigner, S3FileSigner, SnapshotChecker, WasbFileSigner}
 import io.delta.sharing.server.common.actions.{DeletionVectorDescriptor, DeletionVectorsTableFeature, DeltaAddFile, DeltaFormat, DeltaProtocol, DeltaSingleAction}
 import io.delta.sharing.server.config.TableConfig
 import io.delta.sharing.server.model._
 import io.delta.sharing.server.protocol.RefreshToken
+import org.apache.hadoop.hdfs.DistributedFileSystem
+import org.apache.hadoop.hdfs.web.WebHdfsFileSystem
 
 object QueryTypes extends Enumeration {
   type QueryType = Value
@@ -108,6 +109,10 @@ class DeltaSharedTableKernel(
             println("Could not get HDFS login user, it might work if you are running using a local HDFS though")
             println(e)
         }
+        new LocalFileSigner(dataPath, conf, preSignedUrlTimeoutSeconds)
+      case hdfs: DistributedFileSystem =>
+        new LocalFileSigner(dataPath, conf, preSignedUrlTimeoutSeconds)
+      case _: WebHdfsFileSystem =>
         new LocalFileSigner(dataPath, conf, preSignedUrlTimeoutSeconds)
       case _ =>
         throw new IllegalStateException(s"File system ${fs.getClass} is not supported")

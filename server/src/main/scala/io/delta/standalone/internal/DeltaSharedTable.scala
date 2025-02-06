@@ -35,6 +35,7 @@ import org.apache.hadoop.fs.{LocalFileSystem, Path}
 import org.apache.hadoop.fs.azure.NativeAzureFileSystem
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem
 import org.apache.hadoop.fs.s3a.S3AFileSystem
+import org.apache.hadoop.hdfs.DistributedFileSystem
 import org.apache.spark.sql.types.{DataType, MetadataBuilder, StructType}
 import scala.collection.mutable.ListBuffer
 import scala.util.control.NonFatal
@@ -104,6 +105,8 @@ class DeltaSharedTable(
         AbfsFileSigner(abfs, deltaLog.dataPath.toUri, preSignedUrlTimeoutSeconds)
       case gc: GoogleHadoopFileSystem =>
         new GCSFileSigner(deltaLog.dataPath.toUri, conf, preSignedUrlTimeoutSeconds)
+      case _: DistributedFileSystem =>
+        new LocalFileSigner(deltaLog.dataPath.toUri, conf, preSignedUrlTimeoutSeconds)
       case _: LocalFileSystem =>
         new LocalFileSigner(deltaLog.dataPath.toUri, conf, preSignedUrlTimeoutSeconds)
       case _ =>

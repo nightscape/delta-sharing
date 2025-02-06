@@ -44,7 +44,7 @@ lazy val root = (project in file(".")).aggregate(client, spark, server)
 
 lazy val client = (project in file("client")) settings(
   name := "delta-sharing-client",
-  crossScalaVersions := Seq(scala212, scala213),
+  scalaVersion := scala213,
   commonSettings,
   scalaStyleSettings,
   releaseSettings,
@@ -96,9 +96,15 @@ lazy val spark = (project in file("spark")) dependsOn(client) settings(
   }
 )
 
-lazy val server = (project in file("server")) enablePlugins(JavaAppPackaging) settings(
+lazy val generateJibClasspathFile = taskKey[File]("Generate Jib Classpath File")
+
+
+lazy val server = (project in file("server"))
+  .enablePlugins(JavaAppPackaging)
+  .dependsOn(client % "test->test")
+  .settings(
   name := "delta-sharing-server",
-  scalaVersion := scala212,
+  scalaVersion := scala213,
   commonSettings,
   scalaStyleSettings,
   releaseSettings,
@@ -112,7 +118,7 @@ lazy val server = (project in file("server")) enablePlugins(JavaAppPackaging) se
     "com.fasterxml.jackson.core" % "jackson-databind" % "2.15.2",
     "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2",
     "com.fasterxml.jackson.dataformat" % "jackson-dataformat-yaml" % "2.15.2",
-    "org.json4s" %% "json4s-jackson" % "3.5.3" excludeAll(
+    "org.json4s" %% "json4s-jackson" % "3.7.0-M11" excludeAll(
       ExclusionRule("com.fasterxml.jackson.core"),
       ExclusionRule("com.fasterxml.jackson.module")
     ),
@@ -190,9 +196,12 @@ lazy val server = (project in file("server")) enablePlugins(JavaAppPackaging) se
 
     "org.apache.parquet" % "parquet-avro" % "1.12.3" % "test",
     "org.scalatest" %% "scalatest" % "3.2.19" % "test",
-    "dev.zio" %% "zio-test" % "2.0.19" % "test",
-    "dev.zio" %% "zio-test-sbt" % "2.0.19" % "test",
+    "dev.zio" %% "zio-test" % "2.1.14" % "test",
+    "dev.zio" %% "zio-test-sbt" % "2.1.14" % "test",
     "com.github.jatcwang" %% "difflicious-core" % "0.4.3" % "test",
+    "com.github.sideeffffect" %% "zio-testcontainers" % "0.6.0" % "test",
+    "com.dimafeng" %% "testcontainers-scala-core" % "0.41.8" % "test",
+    "org.testcontainers" % "testcontainers" % "1.20.4" % "test",
   ),
   Compile / PB.targets := Seq(
     scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"

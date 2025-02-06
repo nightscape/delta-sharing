@@ -1,0 +1,7 @@
+*.jks
+*.keytab
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
