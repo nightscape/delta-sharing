@@ -1,0 +1,186 @@
+services:
+
+  delta-sharing-server:
+    image: ${DOCKER_REGISTRY}nightscape/delta-sharing-server:1.1.0
+    cpus: 1
+    mem_limit: 1G
+    ports:
+      - "8000:8000"
+    configs:
+      - source: server-config
+        target: /server-config.yaml
+  namenode:
+    image: gchq/hdfs:3.2
+    platform: linux/amd64
+    entrypoint: ["/bin/bash"]
+    command: ["-c", "/opt/hadoop/scripts/namenode-init.sh"]
+    tty: false
+    cpus: 1
+    mem_limit: 1G
+    volumes:
+      - ./configs/hadoop:/etc/hadoop/conf
+      - ./scripts/hadoop:/opt/hadoop/scripts
+      - my-shared-volume:/etc/security/hadoop-truststores
+    tmpfs:
+      - /opt/hadoop/hadoop_data:uid=1000,gid=1000,mode=770,size=10G
+    env_file:
+      - ./env-files/hadoop.env
+      - ./env-files/hdfs.env
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://namenode:9871"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    ports:
+      - "9871:9871"
+      - "9870:9870"
+      - "8020:8020"
+
+  datanode:
+    build:
+      context: .
+      dockerfile: hadoop.dockerfile
+    user: hdfs
+    cpus: 1
+    mem_limit: 1G
+    volumes:
+      - ./configs/hadoop:/etc/hadoop/conf
+      - ./scripts/hadoop:/opt/hadoop/scripts
+      - my-shared-volume:/etc/security/hadoop-truststores
+      - ./test_table:/opt/hadoop/hadoop_data/tmp/delta-test/delta-test-table
+    tmpfs:
+      - /opt/hadoop/hadoop_data:uid=1000,gid=1000,mode=770,size=10G
+    env_file:
+      - ./env-files/hadoop.env
+      - ./env-files/hdfs.env
+    command:
+      - /bin/bash
+      - --verbose
+      - -c
+      - |
+         ~/scripts/datanode-init.sh
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://datanode:9865"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      namenode:
+        condition: service_healthy
+    ports:
+      - "9864:9864"
+      - "9865:9865"
+
+  spark-job:
+    image: bitnami/spark:latest
+    depends_on:
+      - namenode
+    configs:
+      - source: spark-job
+        target: /opt/spark/conf/spark-job.scala
+    command: ["/bin/bash", "-c", "spark-shell --repositories https://artifactory.dbgcloud.io/artifactory/stx-app-maven-prod,http://repol.maven.org/ --packages io.delta:delta-spark_2.13:3.2.1 --conf spark.driver.extraJavaOptions=-Djavax.net.ssl.trustAll=true --conf \"spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension\" --conf \"spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog\" -i /opt/spark/conf/spark-job.scala"]
+    restart: "no"
+
+networks:
+  default:
+    name: localtest.me
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24
+
+volumes:
+  # Shared volume to mount on every hadoop host to list trusted self signed certificates...
+  my-shared-volume:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=1000,gid=1000,mode=770
+
+configs:
+  server-config:
+    content: |
+      ---
+      version: 1
+      shares:
+        - name: "test-share"
+          schemas:
+            - name: "test-schema"
+              tables:
+                - name: "test-table"
+                  location: "webhdfs://namenode.localtest.me:9870/tmp/delta-test/delta-test-table"
+                  id: "00000000-0000-0000-0000-000000000001"
+                  historyShared: true
+                  startVersion: 0
+      authorization:
+        bearerToken: "dapi5e3574ec767ca1548ae5bbed1a2dc04d"
+      host: "localhost"
+      port: 8000
+      endpoint: "/delta-sharing"
+      preSignedUrlTimeoutSeconds: 3600
+      deltaTableCacheSize: 10
+      stalenessAcceptable: false
+      evaluatePredicateHints: true
+      evaluateJsonPredicateHints: true
+      evaluateJsonPredicateHintsV2: true
+      requestTimeoutSeconds: 30
+      queryTablePageSizeLimit: 10000
+      queryTablePageTokenTtlMs: 259200000
+      refreshTokenTtlMs: 3600000
+      defaultFormat: "parquet"
+  spark-job:
+    content: |-
+      import org.apache.spark.sql.SparkSession
+      import io.delta.implicits._
+      import io.delta.tables._
+      import org.apache.spark.sql.functions._
+
+      // Create SparkSession with Delta configurations
+      val spark = {
+        SparkSession.builder()
+          .appName("Delta Table Creation")
+          .master("local[*]")
+          .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+          .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+          .config("spark.databricks.delta.properties.defaults.enableChangeDataFeed", "true")
+          .getOrCreate()
+      }
+      // Initial data
+      spark.sql("DROP TABLE IF EXISTS default.test_table")
+      spark.sql("""
+      CREATE TABLE IF NOT EXISTS default.test_table (
+        id INT,
+        value STRING
+      )
+      USING DELTA
+      LOCATION 'webhdfs://namenode.localtest.me:9870/tmp/delta-test/delta-test-table'
+      TBLPROPERTIES (delta.enableChangeDataFeed = true)
+      """)
+      val data1 = Seq((1, "first"), (2, "second")).toDF("id", "value")
+      data1.write.format("delta").option("delta.enableChangeDataFeed", "true").mode("append").saveAsTable("default.test_table")
+
+      // Add more data
+      val data2 = Seq((3, "third"), (4, "fourth")).toDF("id", "value")
+      data2.write.format("delta").mode("append").saveAsTable("default.test_table")
+
+      // Update some data
+      val deltaTable = DeltaTable.forPath("webhdfs://namenode.localtest.me:9870/tmp/delta-test/delta-test-table")
+      deltaTable.updateExpr(
+        "id = 1",
+        Map("value" -> "'updated first'")
+      )
+
+      // Show final state and history
+      println("Final table contents:")
+      spark.read.format("delta").load("webhdfs://namenode.localtest.me:9870/tmp/delta-test/delta-test-table").show()
+
+      println("\nTable history:")
+      deltaTable.history().show()
+
+      spark.stop()
+      System.exit(0)
+      import org.apache.spark.sql.functions
+      val df = spark.read.format("parquet").load("/downloads/ACC/CLN/SCS/ICEBERG/230033_REPO_TRADE_DATA_GRP")
+      (0 to 24).foreach { h => df.filter(col("TimestampHour") === h).write.format("delta").partitionBy("fact_date").option("delta.enableChangeDataFeed", "true").mode("append").save("/tmp/test_table") }

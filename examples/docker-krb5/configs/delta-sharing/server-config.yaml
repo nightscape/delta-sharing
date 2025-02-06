@@ -6,14 +6,14 @@ shares:
   - name: "test-schema"
     tables:
     - name: "test-table"
-      location: "/tmp/test-table"
+      location: "swebhdfs://namenode.localtest.me:9871/tmp/delta-test/delta-test-table"
       id: "00000000-0000-0000-0000-000000000001"
       historyShared: true
       startVersion: 0
 authorization:
   bearerToken: "dapi5e3574ec767ca1548ae5bbed1a2dc04d"
 host: "localhost"
-port: 8000
+port: 8001
 endpoint: "/delta-sharing"
 preSignedUrlTimeoutSeconds: 3600
 deltaTableCacheSize: 10

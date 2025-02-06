@@ -166,6 +166,15 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
   ))
   def prependShellScript = ""
 
+  def forkArgs = T {
+    super.forkArgs() ++ Seq(
+      "--add-modules", "java.security.jgss",
+      "-Dsun.security.krb5.debug=true",
+      "-Djava.security.auth.login.config=./jaas.conf",
+      "-Djava.security.krb5.conf=./server/src/test/resources/configs/kerberos/krb5.conf",
+      "-Djavax.security.auth.useSubjectCredsOnly=false",
+    )
+  }
   object test extends SbtTests with CommonTestModule {
     val hedgehogVersion = "0.11.0"
     def ivyDeps = Agg(
@@ -173,11 +182,16 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
       ivy"io.delta::delta-core:2.4.0",
       ivy"dev.zio::zio-test:2.1.14",
       ivy"com.github.jatcwang::difflicious-core:0.4.3",
+      ivy"com.dimafeng::testcontainers-scala-core:0.41.8",
+      ivy"org.testcontainers:testcontainers:1.20.4",
+      ivy"com.github.sideeffffect::zio-testcontainers:0.6.0",
     )
 
     def moduleDeps = super.moduleDeps ++ Seq(spark(scala213))
     def forkArgs = T {
-      super.forkArgs() ++ Seq("--add-modules", "java.security.jgss")
+      super.forkArgs() ++ Seq(
+        "--add-modules", "java.security.jgss",
+      )
     }
     def forkEnv = T {
       super.forkEnv() ++ Map(

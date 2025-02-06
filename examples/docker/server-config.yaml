@@ -3,10 +3,19 @@ version: 1
 shares:
 - name: "test-share"
   schemas:
+  - name: "test-.*"
+    tables:
+    - name: "test-.*"
+      location: "gcs://delta-sharing-test/delta-$1/$2"
+      id: "00000000-0000-0000-0000-000000000001"
+      historyShared: true
+      startVersion: 0
+- name: "test-share"
+  schemas:
   - name: "test-schema"
     tables:
     - name: "test-table"
-      location: "/tmp/test-table"
+      location: "webhdfs://namenode.localtest.me:9870/tmp/delta-test/delta-test-table"
       id: "00000000-0000-0000-0000-000000000001"
       historyShared: true
       startVersion: 0

@@ -30,7 +30,7 @@ import com.google.cloud.storage.StorageOptions
 import com.microsoft.azure.storage.{CloudStorageAccount, SharedAccessProtocols, StorageCredentialsSharedAccessSignature}
 import com.microsoft.azure.storage.blob.{SharedAccessBlobPermissions, SharedAccessBlobPolicy}
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.fs.azure.{AzureNativeFileSystemStore, NativeAzureFileSystem}
 import org.apache.hadoop.fs.azurebfs.{AzureBlobFileSystem, AzureBlobFileSystemStore}
 import org.apache.hadoop.fs.azurebfs.services.AuthType
@@ -261,12 +261,28 @@ class LocalFileSigner(
   override def sign(path: Path): PreSignedUrl = {
     val absolutePath = path.toUri
     assert(absolutePath.getPath.nonEmpty, s"cannot get path from $path")
-    val tokenString = delegationToken
-      .headOption
-      .map(token => s"?delegation=${token.encodeToUrlString()}")
-      .getOrElse("")
+    val originalUrl = absolutePath.toString
+    val scheme = absolutePath.getScheme.toLowerCase()
+    val fs = FileSystem.get(absolutePath, conf)
+
+    val finalUrl = scheme match {
+      case "webhdfs" | "swebhdfs" =>
+        // Convert to WebHDFS REST API format for HTTP access
+        // From: swebhdfs://host:port/path
+        // To:   https://host:port/webhdfs/v1/path?op=OPEN&delegation=token
+        val protocol = if (scheme.startsWith("s")) "https" else "http"
+        import absolutePath._
+        val httpUrl =
+          s"${protocol}://${getHost}:${getPort}/webhdfs/v1/${getPath}"
+        addDelegationToken(httpUrl, fs)
+      case "http" | "https" =>
+        addDelegationToken(originalUrl, fs)
+      case _ => originalUrl
+    }
+
+
     PreSignedUrl(
-      absolutePath.toString,
+      finalUrl,
       System.currentTimeMillis() + SECONDS.toMillis(preSignedUrlTimeoutSeconds)
     )
   }
