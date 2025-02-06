@@ -30,7 +30,7 @@ import com.google.cloud.storage.StorageOptions
 import com.microsoft.azure.storage.{CloudStorageAccount, SharedAccessProtocols, StorageCredentialsSharedAccessSignature}
 import com.microsoft.azure.storage.blob.{SharedAccessBlobPermissions, SharedAccessBlobPolicy}
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.fs.azure.{AzureNativeFileSystemStore, NativeAzureFileSystem}
 import org.apache.hadoop.fs.azurebfs.{AzureBlobFileSystem, AzureBlobFileSystemStore}
 import org.apache.hadoop.fs.azurebfs.services.AuthType
@@ -250,13 +250,59 @@ class LocalFileSigner(
     preSignedUrlTimeoutSeconds: Long) extends CloudFileSigner {
   override def sign(path: Path): PreSignedUrl = {
     val absolutePath = path.toUri
+    val fs = FileSystem.get(absolutePath, conf)
+
+
+    val delegationToken = fs.addDelegationTokens("renewer", null)
+
+
     assert(absolutePath.getPath.nonEmpty, s"cannot get path from $path")
-    val tokenString = delegationToken
-      .headOption
-      .map(token => s"?delegation=${token.encodeToUrlString()}")
-      .getOrElse("")
+
+    // Construct the URL based on the scheme and whether we have a delegation token
+    val url = if (delegationToken.isEmpty) {
+      // No delegation token, just use the original URL
+      // This will allow direct access via Hadoop APIs
+      absolutePath.toString
+    } else {
+      val scheme = absolutePath.getScheme
+
+      if (scheme != null && (scheme.equalsIgnoreCase("webhdfs") ||
+                            scheme.equalsIgnoreCase("swebhdfs"))) {
+        // For WebHDFS with delegation token, we need to use the REST API format
+        // This will require HTTP download
+        val host = absolutePath.getHost
+        val port = absolutePath.getPort
+        val filePath = absolutePath.getPath
+
+        // Convert to WebHDFS REST API format for HTTP access
+        // From: swebhdfs://host:port/path
+        // To:   https://host:port/webhdfs/v1/path?op=OPEN&delegation=token
+        val protocol = if (scheme.startsWith("s")) "https" else "http"
+        val restPath = if (filePath.startsWith("/")) filePath.substring(1) else filePath
+        val baseUrl = s"${protocol}://${host}:${port}/webhdfs/v1/${restPath}"
+        val tokenParam = delegationToken.head.encodeToUrlString()
+
+        s"${baseUrl}?op=OPEN&delegation=${tokenParam}"
+      } else if (scheme != null && scheme.equalsIgnoreCase("hdfs")) {
+        // For HDFS with delegation token, try to preserve the original URL
+        // and let the client handle the token
+        val baseUrl = absolutePath.toString
+        val separator = if (baseUrl.contains("?")) "&" else "?"
+        val tokenParam = delegationToken.head.encodeToUrlString()
+
+        s"${baseUrl}${separator}delegation=${tokenParam}"
+      } else {
+        // For other schemes, just use the original URL with the token as a query parameter
+        val baseUrl = absolutePath.toString
+        val separator = if (baseUrl.contains("?")) "&" else "?"
+        val tokenParam = delegationToken.head.encodeToUrlString()
+
+        s"${baseUrl}${separator}delegation=${tokenParam}"
+      }
+    }
+
     PreSignedUrl(
-      absolutePath.toString,
+      url,
       System.currentTimeMillis() + SECONDS.toMillis(preSignedUrlTimeoutSeconds)
     )
   }
