@@ -37,6 +37,7 @@ import org.apache.hadoop.fs.azurebfs.services.AuthType
 import org.apache.hadoop.fs.s3a.DefaultS3ClientFactory
 import org.apache.hadoop.fs.s3a.S3ClientFactory.S3ClientCreationParameters
 import org.apache.hadoop.util.ReflectionUtils
+import org.apache.hadoop.fs.FileSystem
 
 /**
  * @param url The signed url.
@@ -250,6 +251,8 @@ class LocalFileSigner(
     preSignedUrlTimeoutSeconds: Long) extends CloudFileSigner {
   override def sign(path: Path): PreSignedUrl = {
     val absolutePath = path.toUri
+    val fs = FileSystem.get(conf)
+    val delegationToken = fs.addDelegationTokens("renewer", null)
     assert(absolutePath.getPath.nonEmpty, s"cannot get path from $path")
     PreSignedUrl(
       absolutePath.toString,

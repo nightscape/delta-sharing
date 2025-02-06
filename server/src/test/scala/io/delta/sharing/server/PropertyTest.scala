@@ -49,10 +49,11 @@ import scala.reflect.ClassTag
 import java.util.concurrent.TimeUnit
 import org.apache.hadoop.security.UserGroupInformation
 import io.delta.sharing.server.DockerLayer._
+import java.time.Instant
 
 object PropertyTest extends ZIOSpecDefault {
   private val format = "delta"
-  private val spark = SparkSession.builder().master("local[4]").getOrCreate()
+  private lazy val spark = SparkSession.builder().master("local[4]").getOrCreate()
 
   // Create the Hadoop configuration. Notice that later we update it to point to the HDFS cluster.
   val hadoopConf = new Configuration()
@@ -67,15 +68,15 @@ object PropertyTest extends ZIOSpecDefault {
   }
 
   final case class TestServerConfig(
-      port: Int,
-      profileFile: File,
-      stop: Runnable
+                                     port: Int,
+                                     profileString: String,
+                                     stop: Runnable
   )
 
   final case class DeltaServerEnvironment(
-      port: Int,
-      profileFile: File,
-      serverConfig: ServerConfig
+                                           port: Int,
+                                           profileString: String,
+                                           serverConfig: ServerConfig
   )
   final case class TestTables(basePath: Path)
   val serverConfigLayer
@@ -83,19 +84,12 @@ object PropertyTest extends ZIOSpecDefault {
     ZLayer.scoped {
       for {
         port <- findFreePort()
-        profileFile <- ZIO.attempt {
-          val file = Files.createTempFile("delta-test", ".share").toFile
-          FileUtils.writeStringToFile(
-            file,
+        profileString =
             s"""{
              |  "shareCredentialsVersion": 1,
              |  "endpoint": "http://localhost:$port/delta-sharing",
              |  "bearerToken": "dapi5e3574ec767ca1548ae5bbed1a2dc04d"
-             |}""".stripMargin,
-            StandardCharsets.UTF_8
-          )
-          file
-        }
+             |}""".stripMargin
         testTables <- ZIO.service[TestTables]
         basePath = testTables.basePath
         serverConfig = ServerConfig(
@@ -122,7 +116,7 @@ object PropertyTest extends ZIOSpecDefault {
           queryTablePageTokenTtlMs = 259200000,
           refreshTokenTtlMs = 3600000
         )
-      } yield DeltaServerEnvironment(port, profileFile, serverConfig)
+      } yield DeltaServerEnvironment(port, profileString, serverConfig)
     }
 
   val serverLayer
@@ -152,7 +146,7 @@ object PropertyTest extends ZIOSpecDefault {
             }
           )
         )
-      } yield TestServerConfig(env.port, env.profileFile, stopServer)
+      } yield TestServerConfig(env.port, env.profileString, stopServer)
     }
 
   val testTablesLayer
@@ -175,13 +169,14 @@ object PropertyTest extends ZIOSpecDefault {
             UserGroupInformation.loginUserFromSubject(subject)
           }
           fs <- ZIO.attempt(FileSystem.get(hadoopConf))
+          _ <- TestClock.setTime(Instant.now())
           timestamp <- Clock.currentTime(TimeUnit.MILLISECONDS)
           testDir: Path = new Path(s"$hdfsUri/tmp/${format}-test-tables-$timestamp")
           _ <- ZIO.attempt(fs.mkdirs(testDir))
         } yield TestTables(testDir)
       } { testTables =>
         ZIO
-          .attempt(FileSystem.get(hadoopConf).delete(testTables.basePath, true))
+          .attempt(FileSystem.get(hadoopConf).rename(testTables.basePath, testTables.basePath.suffix(s"-deleted")))
           .orDie
       }
     }
@@ -485,7 +480,6 @@ object PropertyTest extends ZIOSpecDefault {
       message: String
   ) {}
 
-
   object CreateManagedTableCommand {
     def gen(
         basePath: Path,
@@ -556,7 +550,6 @@ object PropertyTest extends ZIOSpecDefault {
           val clock = newManualClock
           val deltaLog =
             deltaLogForTableWithClock(hadoopConf, targetPath, clock)
-          val timestamp = java.lang.System.currentTimeMillis()
           clock.setTime(timestamp)
           val transaction = deltaLog.startTransaction()
           val protocol = new Protocol(1, 2)
@@ -639,7 +632,8 @@ object PropertyTest extends ZIOSpecDefault {
     type E = Throwable
     private val fileName: String =
       s"part-${math.abs(this.hashCode())}.snappy.parquet"
-    private val fileUrl: Path = new Path(tablePath, fileName)
+    private val dataPath: Path = new Path(tablePath, "data")
+    private val fileUrl: Path = new Path(dataPath, fileName)
 
     override def update(state: DeltaState): DeltaState = {
       val currentVersion = state
@@ -679,7 +673,6 @@ object PropertyTest extends ZIOSpecDefault {
           val targetPath = new Path(tablePath)
           // Use our hadoopConf which now points to HDFS instead of the local configuration.
           val fs = targetPath.getFileSystem(hadoopConf)
-          val dataPath = new Path(targetPath, "data")
           fs.mkdirs(dataPath)
           val clock = newManualClock
           val deltaLog =
@@ -929,7 +922,16 @@ object PropertyTest extends ZIOSpecDefault {
       testTables <- ZIO.service[TestTables]
       testServerEnv <- ZIO.service[DeltaServerEnvironment]
       testServer <- ZIO.service[TestServerConfig]
-      client = DeltaSharingRestClient(testServer.profileFile.toString)
+      _ = spark
+      profilePath <- ZIO.attempt {
+        val fs = testTables.basePath.getFileSystem(spark.sparkContext.hadoopConfiguration)
+        val profilePath = testTables.basePath.suffix("/delta-test.share")
+        val outputStream = fs.create(profilePath)
+        outputStream.writeBytes(testServer.profileString)
+        outputStream.close()
+        profilePath
+      }
+      client = DeltaSharingRestClient(profilePath.toString)
       commandsGen = { state: DeltaState =>
         List(
           CreateManagedTableCommand.gen(
@@ -948,7 +950,7 @@ object PropertyTest extends ZIOSpecDefault {
           .allStepsSuccessful(steps)
           .debug("Test finished") <*
           ZIO.attempt(
-            FileSystem.get(hadoopConf).delete(testTables.basePath, true)
+            FileSystem.get(hadoopConf).rename(testTables.basePath, testTables.basePath.suffix("-deleted"))
           ) <*
           ZIO.attempt(
             FileSystem.get(hadoopConf).mkdirs(testTables.basePath)
@@ -956,5 +958,5 @@ object PropertyTest extends ZIOSpecDefault {
           ZIO.succeed(testServerEnv.serverConfig.shares.get(0).schemas.clear())
       )
     } yield result
-  }).provideSomeLayer(overallLayer.fresh)
+  }).provideSomeLayer(overallLayer.fresh) @@ TestAspect.timeout(10.minutes)
 }

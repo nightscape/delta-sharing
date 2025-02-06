@@ -193,6 +193,7 @@ lazy val server = (project in file("server")) enablePlugins(JavaAppPackaging) se
     "dev.zio" %% "zio-test" % "2.0.19" % "test",
     "dev.zio" %% "zio-test-sbt" % "2.0.19" % "test",
     "com.github.jatcwang" %% "difflicious-core" % "0.4.3" % "test",
+    "com.github.sideeffffect" %% "zio-testcontainers" % "0.6.0" % "test",
   ),
   Compile / PB.targets := Seq(
     scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"

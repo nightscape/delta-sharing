@@ -1,0 +1,114 @@
+services:
+
+  kerberos-server:
+    image: gcavalcante8808/krb5-server
+    restart: unless-stopped
+    ports:
+      - "88:88"
+      - "88:88/udp"
+      - "464:464"
+      - "749:749"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -znv -w1 127.0.0.1 88 && nc -znv -w1 127.0.0.1 464 && nc -znv -w1 127.0.0.1 749" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    env_file:
+      - ./env-files/kerberos.env
+    volumes:
+    - ./scripts/kerberos/krb5-entrypoint.sh:/docker-entrypoint.sh
+    - krb5kdc-data:/var/lib/krb5kdc
+
+  namenode:
+    build:
+      context: .
+      dockerfile: hadoop.dockerfile
+    user: hdfs
+    tty: false
+    cpus: 1
+    mem_limit: 1G
+    volumes:
+      - ./configs/hadoop:/etc/hadoop/conf
+      - ./configs/kerberos/krb5.conf:/etc/krb5/krb5.conf
+      - ./scripts/hadoop:/opt/hadoop/scripts
+      - my-shared-volume:/etc/security/hadoop-trustores
+    tmpfs:
+      - /opt/hadoop/hadoop_data:uid=1000,gid=1000,mode=770,size=10G
+    env_file:
+      - ./env-files/kerberos.env
+      - ./env-files/hadoop.env
+      - ./env-files/hdfs.env
+    command:
+      - /bin/bash
+      - --verbose
+      - -c
+      - |
+        ~/scripts/namenode-init.sh
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://namenode:9871"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      kerberos-server:
+        condition: service_healthy
+    ports:
+      - "9871:9871"
+      - "8020:8020"
+
+  datanode:
+    build:
+      context: .
+      dockerfile: hadoop.dockerfile
+    user: hdfs
+    cpus: 1
+    mem_limit: 1G
+    volumes:
+      - ./configs/hadoop:/etc/hadoop/conf
+      - ./configs/kerberos/krb5.conf:/etc/krb5/krb5.conf
+      - ./scripts/hadoop:/opt/hadoop/scripts
+      - my-shared-volume:/etc/security/hadoop-trustores
+    tmpfs:
+      - /opt/hadoop/hadoop_data:uid=1000,gid=1000,mode=770,size=10G
+    env_file:
+      - ./env-files/kerberos.env
+      - ./env-files/hadoop.env
+      - ./env-files/hdfs.env
+    command:
+      - /bin/bash
+      - --verbose
+      - -c
+      - |
+         ~/scripts/datanode-init.sh
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://datanode:9865"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      namenode:
+        condition: service_healthy
+      kerberos-server:
+        condition: service_healthy
+    ports:
+      - "9865:9865"
+
+
+networks:
+  hadoop:
+    name: hadoop
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24
+
+volumes:
+  # Shared volume to mount on every hadoop host to list trusted self signed certificates...
+  my-shared-volume:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=1000,gid=1000,mode=770
+  krb5kdc-data:
