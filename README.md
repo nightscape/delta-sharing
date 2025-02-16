@@ -51,7 +51,7 @@ See https://pypi.org/project/delta-kernel-rust-sharing-wrapper/0.2.0/#files for 
 To install the delta-kernel-rust-sharing-wrapper package manually:
 ```
 # you need to use the older version of the delta-sharing package which did not bake delta-kernel-rust-sharing-wrapper into the installation
-pip3 install delta-sharing==1.1.0 
+pip3 install delta-sharing==1.1.0
 
 cd [delta-sharing-root]/python/delta-kernel-rust-sharing-wrapper
 python3 -m venv .venv
@@ -85,11 +85,11 @@ client = delta_sharing.SharingClient(profile_file)
 client.list_all_tables()
 
 # Create a url to access a shared table.
-# A table path is the profile file path following with `#` and the fully qualified name of a table 
+# A table path is the profile file path following with `#` and the fully qualified name of a table
 # (`<share-name>.<schema-name>.<table-name>`).
 table_url = profile_file + "#<share-name>.<schema-name>.<table-name>"
 
-# Fetch 10 rows from a table and convert it to a Pandas DataFrame. This can be used to read sample data 
+# Fetch 10 rows from a table and convert it to a Pandas DataFrame. This can be used to read sample data
 # from a table that cannot fit in the memory.
 delta_sharing.load_as_pandas(table_url, limit=10)
 
@@ -114,13 +114,13 @@ delta_sharing.load_table_changes_as_pandas(table_url, starting_version=0, ending
 # If the code is running with PySpark, you can load table changes as Spark DataFrame.
 delta_sharing.load_table_changes_as_spark(table_url, starting_version=0, ending_version=5)
 ```
-  
+
 
 You can try this by running our [examples](examples/README.md) with the open, example Delta Sharing Server.
 
 ### Details on Profile Paths
 
-- The profile file path for `SharingClient` and `load_as_pandas` can be any URL supported by [FSSPEC](https://filesystem-spec.readthedocs.io/en/latest/index.html) (such as `s3a://my_bucket/my/profile/file`). If you are using [Databricks File System](https://docs.databricks.com/data/databricks-file-system.html), you can also [preface the path with `/dbfs/`](https://docs.databricks.com/data/databricks-file-system.html#dbfs-and-local-driver-node-paths) to access the profile file as if it were a local file.  
+- The profile file path for `SharingClient` and `load_as_pandas` can be any URL supported by [FSSPEC](https://filesystem-spec.readthedocs.io/en/latest/index.html) (such as `s3a://my_bucket/my/profile/file`). If you are using [Databricks File System](https://docs.databricks.com/data/databricks-file-system.html), you can also [preface the path with `/dbfs/`](https://docs.databricks.com/data/databricks-file-system.html#dbfs-and-local-driver-node-paths) to access the profile file as if it were a local file.
 - The profile file path for `load_as_spark` can be any URL supported by Hadoop FileSystem (such as `s3a://my_bucket/my/profile/file`).
 - A table path is the profile file path following with `#` and the fully qualified name of a table (`<share-name>.<schema-name>.<table-name>`).
 
@@ -193,7 +193,7 @@ After you save the profile file and launch Spark with the connector library, you
 
 ### SQL
 ```sql
--- A table path is the profile file path following with `#` and the fully qualified name 
+-- A table path is the profile file path following with `#` and the fully qualified name
 -- of a table (`<share-name>.<schema-name>.<table-name>`).
 CREATE TABLE mytable USING deltaSharing LOCATION '<profile-file-path>#<share-name>.<schema-name>.<table-name>';
 SELECT * FROM mytable;
@@ -202,7 +202,7 @@ SELECT * FROM mytable;
 ### Python
 
 ```python
-# A table path is the profile file path following with `#` and the fully qualified name 
+# A table path is the profile file path following with `#` and the fully qualified name
 # of a table (`<share-name>.<schema-name>.<table-name>`).
 table_path = "<profile-file-path>#<share-name>.<schema-name>.<table-name>"
 df = spark.read.format("deltaSharing").load(table_path)
@@ -211,7 +211,7 @@ df = spark.read.format("deltaSharing").load(table_path)
 ### Scala
 
 ```scala
-// A table path is the profile file path following with `#` and the fully qualified name 
+// A table path is the profile file path following with `#` and the fully qualified name
 // of a table (`<share-name>.<schema-name>.<table-name>`).
 val tablePath = "<profile-file-path>#<share-name>.<schema-name>.<table-name>"
 val df = spark.read.format("deltaSharing").load(tablePath)
@@ -220,7 +220,7 @@ val df = spark.read.format("deltaSharing").load(tablePath)
 ### Java
 
 ```java
-// A table path is the profile file path following with `#` and the fully qualified name 
+// A table path is the profile file path following with `#` and the fully qualified name
 // of a table (`<share-name>.<schema-name>.<table-name>`).
 String tablePath = "<profile-file-path>#<share-name>.<schema-name>.<table-name>";
 Dataset<Row> df = spark.read.format("deltaSharing").load(tablePath);
@@ -228,7 +228,7 @@ Dataset<Row> df = spark.read.format("deltaSharing").load(tablePath);
 
 ### R
 ```r
-# A table path is the profile file path following with `#` and the fully qualified name 
+# A table path is the profile file path following with `#` and the fully qualified name
 # of a table (`<share-name>.<schema-name>.<table-name>`).
 table_path <- "<profile-file-path>#<share-name>.<schema-name>.<table-name>"
 df <- read.df(table_path, "deltaSharing")
@@ -236,7 +236,7 @@ df <- read.df(table_path, "deltaSharing")
 
 You can try this by running our [examples](examples/README.md) with the open, example Delta Sharing Server.
 
-### CDF 
+### CDF
 Starting from release 0.5.0, querying [Change Data Feed](https://docs.databricks.com/delta/delta-change-data-feed.html) is supported with Delta Sharing.
 Once the provider turns on CDF on the original delta table and shares it through Delta Sharing, the recipient can query
 CDF of a Delta Sharing table similar to CDF of a delta table.
@@ -542,7 +542,7 @@ To be more secure, you recommend you to put the server behind a secure proxy suc
 Run the following shell command:
 
 ```
-bin/delta-sharing-server -- --config <the-server-config-yaml-file> 
+bin/delta-sharing-server -- --config <the-server-config-yaml-file>
 ```
 
 `<the-server-config-yaml-file>` should be the path of the yaml file you created in the previous step. You can find options to config JVM in [sbt-native-packager](https://www.scala-sbt.org/sbt-native-packager/archetypes/java_app/index.html#start-script-options).
@@ -657,7 +657,7 @@ Refer to [SBT docs](https://www.scala-sbt.org/1.x/docs/Command-Line-Reference.ht
 
 We use [GitHub Issues](https://github.com/delta-io/delta-sharing/issues) to track community reported issues. You can also [contact](#community) the community for getting answers.
 
-# Contributing 
+# Contributing
 We welcome contributions to Delta Sharing. See our [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
 
 We also adhere to the [Delta Lake Code of Conduct](https://github.com/delta-io/delta/blob/master/CODE_OF_CONDUCT.md).

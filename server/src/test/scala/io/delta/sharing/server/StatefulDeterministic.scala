@@ -1,5 +1,5 @@
+// scalastyle:off
 package io.delta.sharing.server
-
 import zio._
 import zio.stream._
 import zio.test._
@@ -79,7 +79,7 @@ object StatefulDeterministic {
     */
   def genActions[R, S](
       state0: => S,
-      commands: S => List[Gen[R, Command[R, S]]],
+      commands: S => List[Gen[R, Command[R, S]]]
   ): Gen[R, List[Step[R, S]]] = {
     // Use unfoldGen to thread the state through a sequence of generated steps.
     unfoldGen[R, StateWrapper[S], Step[R, S]](

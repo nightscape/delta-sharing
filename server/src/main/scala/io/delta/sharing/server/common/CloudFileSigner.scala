@@ -30,14 +30,13 @@ import com.google.cloud.storage.StorageOptions
 import com.microsoft.azure.storage.{CloudStorageAccount, SharedAccessProtocols, StorageCredentialsSharedAccessSignature}
 import com.microsoft.azure.storage.blob.{SharedAccessBlobPermissions, SharedAccessBlobPolicy}
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.hadoop.fs.azure.{AzureNativeFileSystemStore, NativeAzureFileSystem}
 import org.apache.hadoop.fs.azurebfs.{AzureBlobFileSystem, AzureBlobFileSystemStore}
 import org.apache.hadoop.fs.azurebfs.services.AuthType
 import org.apache.hadoop.fs.s3a.DefaultS3ClientFactory
 import org.apache.hadoop.fs.s3a.S3ClientFactory.S3ClientCreationParameters
 import org.apache.hadoop.util.ReflectionUtils
-import org.apache.hadoop.fs.FileSystem
 
 /**
  * @param url The signed url.

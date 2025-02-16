@@ -1,5 +1,5 @@
 package io.delta.sharing.server
-
+// scalastyle:off
 import com.dimafeng.testcontainers.{DockerComposeContainer, ExposedService}
 import org.testcontainers.images.builder.ImageFromDockerfile
 import zio.testcontainers._
@@ -84,7 +84,7 @@ object DockerLayer {
         kerberosAdminPort = 749,
         namenodeHost = "localhost",
         namenodePort = 8020,
-        namenodeContainerName = sys.env("NAMENODE_HOST")
+        namenodeContainerName = sys.env("NAMENODE_HOST").take(12)
       )
     }
 

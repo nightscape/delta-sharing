@@ -20,7 +20,9 @@ package io.delta.standalone.internal
 import java.net.URI
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.Base64
+
 import scala.collection.JavaConverters._
+
 import com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem
 import com.google.common.hash.Hashing
 import io.delta.standalone.DeltaLog
@@ -33,16 +35,16 @@ import org.apache.hadoop.fs.{LocalFileSystem, Path}
 import org.apache.hadoop.fs.azure.NativeAzureFileSystem
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem
 import org.apache.hadoop.fs.s3a.S3AFileSystem
+import org.apache.hadoop.hdfs.DistributedFileSystem
 import org.apache.spark.sql.types.{DataType, MetadataBuilder, StructType}
-
 import scala.collection.mutable.ListBuffer
 import scala.util.control.NonFatal
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
-import io.delta.sharing.server.{DeltaSharedTableProtocol, DeltaSharingIllegalArgumentException, DeltaSharingUnsupportedOperationException, ErrorStrings, QueryResult, model}
+
+import io.delta.sharing.server.{model, DeltaSharedTableProtocol, DeltaSharingIllegalArgumentException, DeltaSharingUnsupportedOperationException, ErrorStrings, QueryResult}
 import io.delta.sharing.server.common.{AbfsFileSigner, GCSFileSigner, JsonUtils, LocalFileSigner, PreSignedUrl, S3FileSigner, WasbFileSigner}
 import io.delta.sharing.server.config.TableConfig
 import io.delta.sharing.server.protocol.{QueryTablePageToken, RefreshToken}
-import org.apache.hadoop.hdfs.DistributedFileSystem
 
 /**
  * A util class stores all query parameters. Used to compute the checksum in the page token for

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+// scalastyle:off
 package io.delta.sharing.kernel.internal
 
 import java.io.FileNotFoundException
@@ -42,15 +42,17 @@ import org.apache.hadoop.fs.{LocalFileSystem, Path}
 import org.apache.hadoop.fs.azure.NativeAzureFileSystem
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem
 import org.apache.hadoop.fs.s3a.S3AFileSystem
+import org.apache.hadoop.hdfs.DistributedFileSystem
+import org.apache.hadoop.security.UserGroupInformation
 import org.apache.spark.sql.types.{DataType, MetadataBuilder, StructType}
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
+
 import io.delta.sharing.server.{DeltaSharedTableProtocol, DeltaSharingIllegalArgumentException, DeltaSharingUnsupportedOperationException, ErrorStrings, QueryResult}
 import io.delta.sharing.server.common.{AbfsFileSigner, GCSFileSigner, JsonUtils, LocalFileSigner, S3FileSigner, SnapshotChecker, WasbFileSigner}
 import io.delta.sharing.server.common.actions.{DeletionVectorDescriptor, DeletionVectorsTableFeature, DeltaAddFile, DeltaFormat, DeltaProtocol, DeltaSingleAction}
 import io.delta.sharing.server.config.TableConfig
 import io.delta.sharing.server.model._
 import io.delta.sharing.server.protocol.RefreshToken
-import org.apache.hadoop.hdfs.DistributedFileSystem
 
 object QueryTypes extends Enumeration {
   type QueryType = Value
