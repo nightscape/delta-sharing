@@ -253,17 +253,27 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
       emptyJibBuilder.addFileEntriesLayer(layer)
       emptyJibBuilder
     }
+    def generateJibClasspathFile = T {
+      val classpath = runClasspath()
+      val classpathString = (classpath.map(p => s"/app/libs/${p.path.last}") ++ Seq("/app/resources", "/app/classes", "/app/dependency/*")).mkString(":")
+
+      val outputFile = T.dest / "jib-classpath-file"
+      os.write(outputFile, classpathString)
+
+      outputFile
+    }
     override def getJavaBuilder: Task[JavaContainerBuilder] = Task.Anon {
         T.ctx().log.info("Added Azure agent to the container")
         val builder = super.getJavaBuilder()
         builder.addResources((test.resources().head.path /"docker").toNIO)
+        builder.addResources((generateJibClasspathFile()).wrapped.getParent)
         builder
     }
     override def entrypoint = T {
       Seq(
         "sh",
         "-c",
-        "java -cp /app/libs/*:/app/resources:/app/classes:/app/dependency/* io.delta.sharing.server.DeltaSharingService -c /server-config.yaml",
+        "java -cp @/app/resources/jib-classpath-file io.delta.sharing.server.DeltaSharingService -c /server-config.yaml",
       )
     }
   }

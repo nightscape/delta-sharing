@@ -36,6 +36,7 @@ import org.apache.hadoop.fs.azurebfs.{AzureBlobFileSystem, AzureBlobFileSystemSt
 import org.apache.hadoop.fs.azurebfs.services.AuthType
 import org.apache.hadoop.fs.s3a.DefaultS3ClientFactory
 import org.apache.hadoop.fs.s3a.S3ClientFactory.S3ClientCreationParameters
+import org.apache.hadoop.security.UserGroupInformation
 import org.apache.hadoop.util.ReflectionUtils
 
 /**

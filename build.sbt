@@ -264,7 +264,73 @@ lazy val server = (project in file("server"))
   ),
   Compile / PB.targets := Seq(
     scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
-  )
+  ),
+  jibBaseImage := "openjdk:11",
+  jibOrganization := "nightscape",
+  jibName := "delta-sharing-server",
+  generateJibClasspathFile := {
+    println("Generating jib classpath file")
+    val cp: Seq[File] = (Runtime / fullClasspath).value.map(_.data)
+    val cpString = (cp.map(f => s"/app/libs/${f.getName}") ++ Seq("/app/resources", "/app/classes", "/app/dependency/*")).mkString(":")
+    val outFile = target.value / "jib-classpath-file"
+    IO.write(outFile, cpString)
+    outFile
+  },
+  jibMappings := {
+    val cpFile = generateJibClasspathFile.value
+    Seq(
+      cpFile -> "/app/classpath/jib-classpath-file"
+    )
+  },
+  jibJavaAddToClasspath := List(target.value / "jib-classpath-file"),
+  jibArgs := List("-c", "/server-config.yaml"),
+  jibTcpPorts := List(8000),
+  jibUseCurrentTimestamp := true,
+  jibExtraMappings := {
+    Seq(
+      generateJibClasspathFile.value -> "/app/classpath/jib-classpath-file",
+    )
+  },
+  jibEntrypoint := Some(List(
+    "java",
+    "-cp",
+    "@/app/classpath/jib-classpath-file",
+    "io.delta.sharing.server.DeltaSharingService"
+  )),
+  aggregate in findJarContainingClass := false,
+  findJarContainingClass := {
+    // Parse command-line arguments; expects a fully-qualified class name.
+    val args: Seq[String] = spaceDelimited("<class-name>").parsed
+    if (args.isEmpty)
+      sys.error("Usage: server:findJarContainingClass <fully-qualified-class-name>")
+
+    // Convert the fully qualified class name to a resource path.
+    val className = args.head
+    val classFile = className//.replace('.', '/') + ".class"
+
+    // Here the key point: this picks up the server module's runtime classpath.
+    val cpFiles: Seq[File] = (Runtime / fullClasspath).value.map(_.data)
+    println(s"cpFiles: ${cpFiles.mkString("\n")}")
+    println(s"Searching for $classFile in server module's runtime classpath")
+
+    streams.value.log.info(
+      s"Searching for JARs that contain $classFile in server module's runtime classpath"
+    )
+
+    // Scan each JAR for the specific class.
+    cpFiles.filter(_.getName.endsWith(".jar")).foreach { jar =>
+      val jarFile = new java.util.jar.JarFile(jar)
+      try {
+        //println(s"jarFile: ${jarFile.entries().asScala.mkString("\n")}")
+        val matches = jarFile.entries().asScala.filter(_.toString.matches(classFile))
+        if (matches.nonEmpty) {
+          streams.value.log.info(s"Found in: ${jar.getAbsolutePath}\n${matches.mkString("\n")}")
+        }
+      } finally {
+        jarFile.close()
+      }
+    }
+  }
 )
 
 /*
