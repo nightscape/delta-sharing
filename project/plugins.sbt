@@ -38,3 +38,6 @@ addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.1.2")
 libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.12"
 
 addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.14.2")
+
+addSbtPlugin("de.gccc.sbt" % "sbt-jib" % "1.3.7")
+libraryDependencies += "com.google.cloud.tools" % "jib-core" % "0.27.2"
