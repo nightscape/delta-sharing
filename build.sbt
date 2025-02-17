@@ -205,7 +205,39 @@ lazy val server = (project in file("server"))
   ),
   Compile / PB.targets := Seq(
     scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
-  )
+  ),
+  jibBaseImage := "openjdk:11",
+  jibOrganization := "nightscape",
+  jibName := "delta-sharing-server",
+  generateJibClasspathFile := {
+    println("Generating jib classpath file")
+    val cp: Seq[File] = (Runtime / fullClasspath).value.map(_.data)
+    val cpString = (cp.map(f => s"/app/libs/${f.getName}") ++ Seq("/app/resources", "/app/classes", "/app/dependency/*")).mkString(":")
+    val outFile = target.value / "jib-classpath-file"
+    IO.write(outFile, cpString)
+    outFile
+  },
+  jibMappings := {
+    val cpFile = generateJibClasspathFile.value
+    Seq(
+      cpFile -> "/app/classpath/jib-classpath-file"
+    )
+  },
+  jibJavaAddToClasspath := List(target.value / "jib-classpath-file"),
+  jibArgs := List("-c", "/server-config.yaml"),
+  jibTcpPorts := List(8000),
+  jibUseCurrentTimestamp := true,
+  jibExtraMappings := {
+    Seq(
+      generateJibClasspathFile.value -> "/app/classpath/jib-classpath-file",
+    )
+  },
+  jibEntrypoint := Some(List(
+    "java",
+    "-cp",
+    "@/app/classpath/jib-classpath-file",
+    "io.delta.sharing.server.DeltaSharingService"
+  )),
 )
 
 /*

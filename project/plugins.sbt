@@ -36,3 +36,6 @@ addSbtPlugin("com.github.sbt" % "sbt-native-packager" % "1.9.16")
 addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.1.2")
 
 libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.12"
+
+addSbtPlugin("de.gccc.sbt" % "sbt-jib" % "1.3.7")
+libraryDependencies += "com.google.cloud.tools" % "jib-core" % "0.27.2"
