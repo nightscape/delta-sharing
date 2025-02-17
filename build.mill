@@ -6,8 +6,9 @@ import mill.scalalib.Assembly._
 import $ivy.`com.lihaoyi::mill-contrib-scalapblib:`
 import contrib.scalapblib._
 
-import $ivy.`com.lihaoyi::mill-contrib-docker:`
-import contrib.docker.DockerModule
+import $ivy.`com.lihaoyi:mill-dist:0.12.8`
+import $ivy.`com.ofenbeck::mill-docker_mill0.11:0.0.2`
+import com.ofenbeck.mill.docker.DockerJibModule
 
 val sparkVersion = "3.3.4"
 val scala212 = "2.12.20"
@@ -93,7 +94,7 @@ trait SparkModule extends CrossSbtModule with CommonModule { outer =>
   }
 }
 
-object server extends SbtModule with CommonModule with ScalaPBModule with DockerModule {
+object server extends SbtModule with CommonModule with ScalaPBModule with DockerJibModule {
   def scalaVersion = scala213
   def scalaPBVersion = "0.11.7"
   def scalaPBSources: T[Seq[PathRef]] = Task.Sources {
@@ -178,9 +179,22 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
     def prependShellScript = ""
   }
   object docker extends DockerConfig {
-    def tags = List("deltaio/delta-sharing-server")
+    import com.ofenbeck.mill.docker._
+    def targetImage = JibImage.DockerDaemonImage("deltaio/delta-sharing-server")
 
-    def baseImage = "openjdk:11"
+    def sourceImage = JibImage.RegistryImage("openjdk:11")
+    def labels = T {
+      Map(
+        "com.ofenbeck.mill.docker"         -> "javaBuildSettings",
+        "com.ofenbeck.mill.docker.version" -> "0.0.5",
+      )
+    }
+    def platforms = T {
+      Set(
+        Platform("linux", "arm64"),
+        Platform("linux", "amd64"),
+      )
+    }
     def pullBaseImage = true
     def exposedPorts = Seq(8080)
   }

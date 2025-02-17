@@ -254,7 +254,7 @@ class LocalFileSigner(
     val delegationToken = fs.addDelegationTokens("renewer", null)
     assert(absolutePath.getPath.nonEmpty, s"cannot get path from $path")
     PreSignedUrl(
-      absolutePath.toString,
+      s"$absolutePath?delegation=${delegationToken.head.encodeToUrlString()}",
       System.currentTimeMillis() + SECONDS.toMillis(preSignedUrlTimeoutSeconds)
     )
   }

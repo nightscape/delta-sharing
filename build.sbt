@@ -202,7 +202,26 @@ lazy val server = (project in file("server"))
   ),
   Compile / PB.targets := Seq(
     scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
-  )
+  ),
+  jibBaseImage := "openjdk:11",
+  jibName := "delta-sharing-server",
+  //jibRegistry := "some-ecr-repository",
+  jibUseCurrentTimestamp := true,
+  //jibCustomRepositoryPath := Some(jibName.value),
+  //jibExtraMappings := {
+  //  val resolved = javaAgents.value.map { agent =>
+  //      update.value.matching(Modules.exactFilter(agent.module)).headOption map {
+  //          jar => ResolvedAgent(agent, jar)
+  //      }
+  //  }
+  //  for {
+  //      resolvedAgent <- resolved.flatten
+  //  } yield {
+  //      resolvedAgent.artifact -> s"/root/lib/${resolvedAgent.agent.name}.jar"
+  //  }
+  //},
+  //jibTargetImageCredentialHelper := Some("ecr-login"),
+  //jibBaseImageCredentialHelper := Some("ecr-login")
 )
 
 /*

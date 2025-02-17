@@ -130,5 +130,5 @@ object StatefulDeterministic {
   def allStepsSuccessful[R, S](steps: List[Step[R, S]]): ZIO[R, _, TestResult] =
     ZIO
       .foreach(steps)(s => s.command.executeAndCheck(s.state))
-      .map(_.foldLeft(assertTrue(true))(_ && _))
+      .map(_.dropWhile(_.isSuccess).foldLeft(assertTrue(true))(_ && _))
 }
