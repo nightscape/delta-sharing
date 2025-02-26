@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "delta-sharing-metals": {
+      "url": "http://localhost:56949/sse"
+    }
+  }
+}

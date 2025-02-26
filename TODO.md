@@ -1,0 +1,21 @@
+- [ ] Implement externalLocationTemplate
+  - [x] Adapt TableState in PropertyTest to have relative path in `path`
+    - [x] Find usages of `AddDataCommand#fileUrl` which require an absolute path (I switched to relative)
+    - [x] Find other constructor calls to `AddCDFFile`, `AddFile`, ... where an absolute URL is still passed
+    - [x] Adapt all constructor calls to use relativ URLs
+  - [ ] Adapt test logic to compare relative paths
+  - [ ] Check if the `hdfsPathCheck` is actually checking the right URLs
+  - [ ] ? Rewrite `hdfsPathCheck` to be an assertion
+  - [ ] Think about another way to check the validity of the returned URLs
+    - Maybe only use the `ReadTableSparkCommand`?
+    - Maybe actually try to retrieve the files from the given URLs?
+- [ ] Get debugging to work again
+  - [ ] Fix running the PropertyTest in Cursor
+    - [ ] Find out why Cursor throws a `java.lang.ClassNotFoundException: shaded.parquet.com.fasterxml.jackson.databind.ObjectMapper` and Mill doesn't
+    - [ ] Find out if test in Cursor can be run through Mill
+  - [ ] Find out why IntelliJ is not using Mill to compile the code
+    - [ ] Search settings for Mill, Compiler
+    - [ ] Ask Perplexity again in existing chat
+- [ ] Set a breakpoint in `println(diff)` in Commands.scala
+- [ ] Check if the green lined file is in the file system
+- [ ] Check why green lined file is not in expected data

@@ -1,0 +1,51 @@
+# Instructions
+
+During your interaction with the user, if you find anything reusable in this project (e.g. version of a library, model name), especially about a fix to a mistake you made or a correction you received, you should take note in the `Lessons` section in the `.cursorrules` file so you will not make the same mistake again.
+
+You should also use the `.cursorrules` file as a Scratchpad to organize your thoughts. Especially when you receive a new task, you should first review the content of the Scratchpad, clear old different task if necessary, first explain the task, and plan the steps you need to take to complete the task. You can use todo markers to indicate the progress, e.g.
+[X] Task 1
+[ ] Task 2
+
+Also update the progress of the task in the Scratchpad when you finish a subtask.
+Especially when you finished a milestone, it will help to improve your depth of task accomplishment to use the Scratchpad to reflect and plan.
+The goal is to help you maintain a big picture as well as the progress of the task. Always refer to the Scratchpad when you plan the next step.
+
+
+# Lessons
+
+## User Specified Lessons
+
+- Include info useful for debugging in the program output.
+- Read the file before you try to edit it.
+
+## Cursor learned
+
+- Add debug information to stderr while keeping the main output clean in stdout for better pipeline integration
+
+## Current Task Lessons
+- Must keep DN templates consistent across all topology files to match ldif suffix
+- Always search for all occurrences of misconfigured base DN when debugging LDAP
+- AWS SDK v2 uses software.amazon.awssdk group ID and modular dependencies (e.g., s3, url-connection-client)
+- AWS SDK v2 version 2.28.17 is current stable version as of 2024
+- Both AWS SDK v1 and v2 can coexist in same project for gradual migration
+
+# Scratchpad
+
+## Current Task: Add AWS SDK v2
+The project already uses some AWS SDK v2 components (S3Presigner) but lacks proper dependencies.
+Current state:
+- CloudFileSigner.scala imports AWS SDK v2 classes but dependencies are missing from build files
+- Still has AWS SDK v1 bundle dependency (com.amazonaws:aws-java-sdk-bundle:1.12.189)
+- Need to add proper AWS SDK v2 dependencies for S3 and presigner
+
+Plan:
+[X] Add AWS SDK v2 BOM (Bill of Materials) for version management
+[X] Add AWS SDK v2 S3 service dependency
+[X] Add AWS SDK v2 URL presigner dependency
+[X] Update both build.sbt and build.mill with consistent dependencies
+[X] Test compilation to ensure no missing dependencies
+
+✅ Task completed successfully!
+- Added AWS SDK v2 version 2.28.17 dependencies to both build files
+- Both sbt and mill compilation successful
+- Project can now use AWS SDK v2 S3 and presigner services alongside existing v1 dependencies

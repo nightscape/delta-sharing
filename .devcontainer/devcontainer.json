@@ -1,0 +1,8 @@
+{
+  "remoteUser": "1001",
+  "containerUser": "1001",
+  "workspaceFolder": "/opt/bitnami/spark",
+  "remoteEnv": {
+    "HOME": "/opt/bitnami/spark"
+  }
+}
