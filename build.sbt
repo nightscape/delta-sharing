@@ -30,6 +30,33 @@ def sparkVersionFor(scalaVer: String): String = scalaVer match {
   case _ => sys.error(s"Unsupported Scala version: $scalaVer")
 }
 
+// Define common Hadoop exclusions to avoid dependency conflicts
+lazy val hadoopExclusions = Seq(
+  ExclusionRule("org.apache.hadoop", "hadoop-common"),
+  ExclusionRule("org.apache.hadoop", "hadoop-hdfs-client"),
+  ExclusionRule("org.apache.hadoop", "hadoop-yarn-api"),
+  ExclusionRule("org.apache.hadoop", "hadoop-yarn-common"),
+  ExclusionRule("org.apache.hadoop", "hadoop-yarn-client"),
+  //ExclusionRule("org.apache.hadoop", "hadoop-mapreduce-client-core"),
+  //ExclusionRule("org.apache.hadoop", "hadoop-mapreduce-client-common"),
+  ExclusionRule("org.apache.hadoop", "hadoop-common"),
+  ExclusionRule("org.apache.hadoop.thirdparty", "hadoop-shaded-guava"),
+  ExclusionRule("org.apache.hadoop.thirdparty", "hadoop-shaded-protobuf_3_7")
+)
+
+// Define exclusions for log4j, JAX-RS, and Jersey conflicts
+lazy val additionalExclusions = Seq(
+  // Log4j conflicts
+  ExclusionRule("ch.qos.reload4j", "reload4j"),
+  ExclusionRule("org.apache.logging.log4j", "log4j-1.2-api"),
+  // JAX-RS conflicts
+  ExclusionRule("jakarta.ws.rs", "jakarta.ws.rs-api"),
+  ExclusionRule("javax.ws.rs", "jsr311-api"),
+  // Jersey conflicts
+  ExclusionRule("com.sun.jersey", "jersey-server"),
+  ExclusionRule("org.glassfish.jersey.core", "jersey-server")
+)
+
 lazy val commonSettings = Seq(
   organization := "io.delta",
   fork := true,
@@ -168,6 +195,58 @@ lazy val server = (project in file("server"))
   dockerUsername := Some("deltaio"),
   dockerBuildxPlatforms := Seq("linux/arm64", "linux/amd64"),
   scriptClasspath ++= Seq("../conf"),
+  // Keep the merge strategy as a fallback for any remaining conflicts
+  assembly / assemblyMergeStrategy := {
+    case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
+    case PathList("META-INF", xs @ _*) => MergeStrategy.discard
+    case "module-info.class" => MergeStrategy.discard
+    case "reference.conf" => MergeStrategy.concat
+    case "application.conf" => MergeStrategy.concat
+    case "plugin.properties" => MergeStrategy.concat
+    case "log4j.properties" => MergeStrategy.concat
+    case "git.properties" => MergeStrategy.concat
+    case "overview.html" => MergeStrategy.discard
+    // Handle Hadoop duplicate classes
+    case PathList("org", "apache", "hadoop", xs @ _*) => MergeStrategy.first
+    case PathList("org", "apache", "spark", xs @ _*) => MergeStrategy.first
+    case PathList("org", "apache", "commons", xs @ _*) => MergeStrategy.first
+    // Handle Log4j conflicts
+    case PathList("org", "apache", "log4j", xs @ _*) => MergeStrategy.first
+    case PathList("ch", "qos", "reload4j", xs @ _*) => MergeStrategy.first
+    case PathList("org", "apache", "logging", "log4j", xs @ _*) => MergeStrategy.first
+    // Handle JAX-RS conflicts
+    case PathList("javax", "ws", "rs", xs @ _*) => MergeStrategy.first
+    case PathList("jakarta", "ws", "rs", xs @ _*) => MergeStrategy.first
+    // Handle Jersey conflicts
+    case PathList("com", "sun", "research", "ws", "wadl", xs @ _*) => MergeStrategy.first
+    case PathList("jersey", "repackaged", xs @ _*) => MergeStrategy.first
+    // Other common conflicts
+    case PathList("com", "google", xs @ _*) => MergeStrategy.first
+    case PathList("com", "esotericsoftware", xs @ _*) => MergeStrategy.first
+    case PathList("com", "codahale", xs @ _*) => MergeStrategy.first
+    case PathList("com", "yammer", xs @ _*) => MergeStrategy.first
+    case PathList("org", "slf4j", xs @ _*) => MergeStrategy.first
+    case PathList("io", "netty", xs @ _*) => MergeStrategy.first
+    case PathList("org", "aopalliance", xs @ _*) => MergeStrategy.first
+    case PathList("javax", "inject", xs @ _*) => MergeStrategy.first
+    case PathList("javax", "servlet", xs @ _*) => MergeStrategy.first
+    case PathList("javax", "activation", xs @ _*) => MergeStrategy.first
+    case PathList("javax", "annotation", xs @ _*) => MergeStrategy.first
+    case PathList("javax", "xml", xs @ _*) => MergeStrategy.first
+    case PathList("org", "objenesis", xs @ _*) => MergeStrategy.first
+    case PathList("scala", xs @ _*) => MergeStrategy.first
+    case PathList("net", "jpountz", xs @ _*) => MergeStrategy.first
+    case PathList("org", "tukaani", xs @ _*) => MergeStrategy.first
+    case PathList("org", "xerial", xs @ _*) => MergeStrategy.first
+    case PathList("org", "joda", xs @ _*) => MergeStrategy.first
+    case PathList("org", "json4s", xs @ _*) => MergeStrategy.first
+    case PathList("org", "xml", xs @ _*) => MergeStrategy.first
+    case PathList("org", "w3c", xs @ _*) => MergeStrategy.first
+    case PathList("org", "apache", "hadoop", "thirdparty", xs @ _*) => MergeStrategy.first
+    case x =>
+      val oldStrategy = (assembly / assemblyMergeStrategy).value
+      oldStrategy(x)
+  },
   libraryDependencies ++= Seq(
     // Pin versions for jackson libraries as the new version of `jackson-module-scala` introduces a
     // breaking change making us not able to use `delta-standalone`.
@@ -176,91 +255,125 @@ lazy val server = (project in file("server"))
     "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2",
     "com.fasterxml.jackson.dataformat" % "jackson-dataformat-yaml" % "2.15.2",
     "org.json4s" %% "json4s-jackson" % "3.7.0-M11" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module")
+      ) ++ additionalExclusions): _*
     ),
     "com.linecorp.armeria" %% "armeria-scalapb" % "1.9.2" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("org.json4s")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("org.json4s")
+      ) ++ additionalExclusions): _*
     ),
     "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("org.json4s")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("org.json4s")
+      ) ++ additionalExclusions): _*
     ),
+    // Apply Hadoop exclusions to avoid duplicate classes
     "org.apache.hadoop" % "hadoop-aws" % "3.3.4" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("com.google.guava", "guava"),
-      ExclusionRule("com.amazonaws", "aws-java-sdk-bundle")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("com.google.guava", "guava"),
+        ExclusionRule("com.amazonaws", "aws-java-sdk-bundle")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
-    "com.amazonaws" % "aws-java-sdk-bundle" % "1.12.189",
+    "com.amazonaws" % "aws-java-sdk-bundle" % "1.12.189" excludeAll(
+      additionalExclusions: _*
+    ),
+    // Apply Hadoop exclusions to avoid duplicate classes
     "org.apache.hadoop" % "hadoop-azure" % "3.3.4" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("com.google.guava", "guava")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("com.google.guava", "guava")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
     "com.google.cloud" % "google-cloud-storage" % "2.2.2" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module")
+      ) ++ additionalExclusions): _*
     ),
     "com.google.cloud.bigdataoss" % "gcs-connector" % "hadoop2-2.2.4" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
-    "org.apache.hadoop" % "hadoop-common" % "3.3.4" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("com.google.guava", "guava")
-    ),
+    // Apply Hadoop exclusions to avoid duplicate classes
+    // "org.apache.hadoop" % "hadoop-common" % "3.3.4" excludeAll(
+    //   (Seq(
+    //     ExclusionRule("com.fasterxml.jackson.core"),
+    //     ExclusionRule("com.fasterxml.jackson.module"),
+    //     ExclusionRule("com.google.guava", "guava")
+    //   ) ++ hadoopExclusions ++ additionalExclusions): _*
+    // ),
+    // Apply Hadoop exclusions to avoid duplicate classes
     "org.apache.hadoop" % "hadoop-client" % "3.3.4" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("com.google.guava", "guava")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("com.google.guava", "guava")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
     "org.apache.parquet" % "parquet-hadoop" % "1.12.3" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("com.google.guava", "guava")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("com.google.guava", "guava")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
-    "io.delta" %% "delta-standalone" % "3.2.0" % "provided" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("com.google.guava", "guava")
+    "io.delta" %% "delta-standalone" % "3.2.0" excludeAll(
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("com.google.guava", "guava")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
     "io.delta" % "delta-kernel-api" % "3.2.0" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("com.google.guava", "guava")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("com.google.guava", "guava")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
     "io.delta" % "delta-kernel-defaults" % "3.2.0" excludeAll(
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("com.google.guava", "guava")
+      (Seq(
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("com.google.guava", "guava")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
     "org.apache.spark" %% "spark-sql" % "3.3.4" excludeAll(
-      ExclusionRule("org.slf4j"),
-      ExclusionRule("io.netty"),
-      ExclusionRule("com.fasterxml.jackson.core"),
-      ExclusionRule("com.fasterxml.jackson.module"),
-      ExclusionRule("org.json4s"),
-      ExclusionRule("com.google.guava", "guava")
+      (Seq(
+        ExclusionRule("org.slf4j"),
+        ExclusionRule("io.netty"),
+        ExclusionRule("com.fasterxml.jackson.core"),
+        ExclusionRule("com.fasterxml.jackson.module"),
+        ExclusionRule("org.json4s"),
+        ExclusionRule("com.google.guava", "guava")
+      ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
     "org.slf4j" % "slf4j-api" % "1.6.1",
     "org.slf4j" % "slf4j-simple" % "1.6.1",
     "net.sourceforge.argparse4j" % "argparse4j" % "0.9.0",
 
-    "org.apache.parquet" % "parquet-avro" % "1.12.3" % "test",
-    "org.scalatest" %% "scalatest" % "3.2.19" % "test",
-    "dev.zio" %% "zio-test" % "2.1.14" % "test",
-    "dev.zio" %% "zio-test-sbt" % "2.1.14" % "test",
-    "com.github.jatcwang" %% "difflicious-core" % "0.4.3" % "test",,
+    "org.apache.parquet" % "parquet-avro" % "1.12.3" % "test" excludeAll(additionalExclusions: _*),
+    "org.scalatest" %% "scalatest" % "3.2.19" % "test" excludeAll(additionalExclusions: _*),
+    "dev.zio" %% "zio-test" % "2.1.14" % "test" excludeAll(additionalExclusions: _*),
+    "dev.zio" %% "zio-test-sbt" % "2.1.14" % "test" excludeAll(additionalExclusions: _*),
+    "com.github.jatcwang" %% "difflicious-core" % "0.4.3" % "test" excludeAll(additionalExclusions: _*),,
     "org.bouncycastle" % "bcprov-jdk15on" % "1.70" % "test",
     "org.bouncycastle" % "bcpkix-jdk15on" % "1.70" % "test"
-    "com.github.sideeffffect" %% "zio-testcontainers" % "0.6.0" % "test",
-    "com.dimafeng" %% "testcontainers-scala-core" % "0.41.8" % "test",
-    "org.testcontainers" % "testcontainers" % "1.20.4" % "test",
+    "com.github.sideeffffect" %% "zio-testcontainers" % "0.6.0" % "test" excludeAll(additionalExclusions: _*),
+    "com.dimafeng" %% "testcontainers-scala-core" % "0.41.8" % "test" excludeAll(additionalExclusions: _*),
+    "org.testcontainers" % "testcontainers" % "1.20.4" % "test" excludeAll(additionalExclusions: _*),
   ),
   Compile / PB.targets := Seq(
     scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
@@ -456,3 +569,11 @@ releaseProcess := Seq[ReleaseStep](
   setNextVersion,
   commitNextVersion
 )
+
+// Top-level declaration of the task key is fine:
+val findJarContainingClass = inputKey[Unit](
+  "Find JARs on the runtime classpath that contain the given class"
+)
+
+// In the root project settings:
+aggregate in findJarContainingClass := false
