@@ -84,13 +84,13 @@ services:
       - "9865:9865"
 
   spark-job:
-    image: bitnami/spark:latest
+    image: bitnami/spark:3.5
     depends_on:
       - namenode
     configs:
       - source: spark-job
         target: /opt/spark/conf/spark-job.scala
-    command: ["/bin/bash", "-c", "spark-shell --repositories https://artifactory.dbgcloud.io/artifactory/stx-app-maven-prod,http://repol.maven.org/ --packages io.delta:delta-spark_2.13:3.2.1 --conf spark.driver.extraJavaOptions=-Djavax.net.ssl.trustAll=true --conf \"spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension\" --conf \"spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog\" -i /opt/spark/conf/spark-job.scala"]
+    command: ["/bin/bash", "-c", "spark-shell --repositories https://artifactory.dbgcloud.io/artifactory/stx-app-maven-prod,http://repol.maven.org/ --packages io.delta:delta-spark_2.12:3.2.1 --conf spark.driver.extraJavaOptions=-Djavax.net.ssl.trustAll=true --conf \"spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension\" --conf \"spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog\" -i /opt/spark/conf/spark-job.scala"]
     restart: "no"
 
 networks:

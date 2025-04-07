@@ -423,6 +423,7 @@ lazy val server = (project in file("server"))
   )),
   aggregate in findJarContainingClass := false,
   findJarContainingClass := {
+    import complete.DefaultParsers._
     // Parse command-line arguments; expects a fully-qualified class name.
     val args: Seq[String] = spaceDelimited("<class-name>").parsed
     if (args.isEmpty)
@@ -445,6 +446,7 @@ lazy val server = (project in file("server"))
     cpFiles.filter(_.getName.endsWith(".jar")).foreach { jar =>
       val jarFile = new java.util.jar.JarFile(jar)
       try {
+        import scala.jdk.CollectionConverters._
         //println(s"jarFile: ${jarFile.entries().asScala.mkString("\n")}")
         val matches = jarFile.entries().asScala.filter(_.toString.matches(classFile))
         if (matches.nonEmpty) {

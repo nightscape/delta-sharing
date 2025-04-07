@@ -81,6 +81,14 @@ object PropertyTest extends ZIOSpecDefault {
                     TableConfig(
                       name = "table-$1",
                       location = s"$basePath/test-schema/table-*",
+                      externalLocationTemplate = if (basePath.toString.startsWith("hdfs://")) {
+                        val knoxWebHdfsContext = hadoopConfiguration.get("knox.webhdfs.context")
+                        // TODO: Don't hardcode
+                        val knoxUrl = s"knoxswebhdfs://knox-gateway.localtest.me:8443"
+                        s"$knoxUrl{path}"
+                      } else {
+                        null
+                      },
                       id = "",
                       historyShared = true,
                       startVersion = 0L
@@ -171,31 +179,24 @@ object PropertyTest extends ZIOSpecDefault {
           _ <- ZIO.attempt(fs.mkdirs(testDir))
         } yield TestTables(testDir)
       } { testTables =>
-        val releaseEffectAny: ZIO[Any, Throwable, Unit] = for {
-          _ <- ZIO.attempt {
-            println(s"[DEBUG] basePath: ${testTables.basePath}, uri: ${testTables.basePath.toUri}")
-            val defaultFs = FileSystem.get(hadoopConf)
-            println(s"[DEBUG] defaultFS uri: ${defaultFs.getUri}")
+        ZIO.serviceWithZIO[FileSystem] { fs =>
+          for {
+            _ <- ZIO.attempt {
+              println(s"[DEBUG] basePath: ${testTables.basePath}, uri: ${testTables.basePath.toUri}")
+              println(s"[DEBUG] FileSystem uri: ${fs.getUri}")
 
-            val pathFs = testTables.basePath.getFileSystem(hadoopConf)
-            println(s"[DEBUG] pathFS uri: ${pathFs.getUri}")
-
-            // Attempt to rename using the FileSystem associated with the basePath
-            pathFs.rename(
-              testTables.basePath,
-              testTables.basePath.suffix("-deleted")
-            )
-            ()
-          }
-          _ <- ZIO.attempt {
-            val pathFs = testTables.basePath.getFileSystem(hadoopConf)
-            println(s"[DEBUG] mkdirs using pathFS uri: ${pathFs.getUri}")
-            pathFs.mkdirs(testTables.basePath)
-            ()
-          }
-        } yield ()
-        val releaseEffectSafe: ZIO[Any, Nothing, Unit] = releaseEffectAny.orDie
-        ZIO.serviceWithZIO[FileSystem](_ => releaseEffectSafe)
+              // Attempt to rename using the FileSystem
+              fs.rename(
+                testTables.basePath,
+                testTables.basePath.suffix("-deleted")
+              )
+            }.orDie
+            _ <- ZIO.attempt {
+              println(s"[DEBUG] mkdirs using FileSystem uri: ${fs.getUri}")
+              fs.mkdirs(testTables.basePath)
+            }.orDie
+          } yield ()
+        }
       }
     }
 
@@ -239,13 +240,14 @@ object PropertyTest extends ZIOSpecDefault {
     )
 
   case class TableState(
-      tableId: String,
-      tablePath: String,
+      tableConfig: TableConfig,
       commits: List[Commit] = Nil,
       currentVersion: Option[Long] = None,
       currentSchema: Option[StructType] = None,
       knownPartitionValues: Map[String, Set[String]] = Map.empty
   ) {
+    def tableId: String = tableConfig.id
+    def tablePath: Path = new Path(tableConfig.location)
     def addCommit(commit: Commit): TableState =
       copy(
         commits = commits :+ commit,
@@ -253,7 +255,8 @@ object PropertyTest extends ZIOSpecDefault {
       )
     def getFiles(
         startingVersion: Option[Long],
-        endingVersion: Option[Long]
+        endingVersion: Option[Long],
+        returnExternalUrls: Boolean = true,
     ): clientModel.DeltaTableFiles = {
       if (commits.flatMap(_.actions).size < 2) {
         throw new IllegalStateException(
@@ -275,6 +278,7 @@ object PropertyTest extends ZIOSpecDefault {
         case Some(v) => v
         case None    => null
       })
+      val urlTransformation: String => String = if(returnExternalUrls) externalUrl(_) else identity(_)
       val files = ArrayBuffer[clientModel.AddFile]()
       val cdcFiles = ArrayBuffer[clientModel.AddCDCFile]()
       val removeFiles = ArrayBuffer[clientModel.RemoveFile]()
@@ -290,10 +294,10 @@ object PropertyTest extends ZIOSpecDefault {
           commit.actions.foreach {
             case a: clientModel.AddFile =>
               version = math.max(version, commit.version)
-              files.append(a)
+              files.append(a.copy(url = urlTransformation(a.url)))
             case c: clientModel.AddCDCFile =>
               version = math.max(version, c.version)
-              cdcFiles.append(c)
+              cdcFiles.append(c.copy(urlTransformation(c.url)))
             case r: clientModel.RemoveFile =>
               version = math.max(version, r.version)
               removeFiles.append(r)
@@ -305,7 +309,7 @@ object PropertyTest extends ZIOSpecDefault {
               version = math.max(version, a.version)
               files.append(
                 clientModel.AddFile(
-                  url = a.url,
+                  url = urlTransformation(a.url),
                   id = a.id,
                   partitionValues = a.partitionValues,
                   size = a.size,
@@ -335,12 +339,16 @@ object PropertyTest extends ZIOSpecDefault {
       )
     }
 
-    def getCDFFiles(
+    def externalUrl(url: String) =
+      s"${tableConfig.clientLocation}/$url"
+
+    def expectedDeltaTableFiles(
         startingVersion: Option[Long] = None,
         endingVersion: Option[Long] = None,
         startingTimestamp: Option[String] = None,
         endingTimestamp: Option[String] = None,
-        includeHistoricalMetadata: Boolean = false
+        includeHistoricalMetadata: Boolean = false,
+        returnExternalUrls: Boolean = true,
     ): clientModel.DeltaTableFiles = {
       if (commits.size < 1) {
         throw new IllegalStateException(
@@ -362,6 +370,7 @@ object PropertyTest extends ZIOSpecDefault {
         case Some(v) => v
         case None    => null
       })
+      val urlTransformation: String => String = if(returnExternalUrls) externalUrl(_) else identity(_)
       val addFiles = ArrayBuffer[clientModel.AddFileForCDF]()
       val cdcFiles = ArrayBuffer[clientModel.AddCDCFile]()
       val removeFiles = ArrayBuffer[clientModel.RemoveFile]()
@@ -377,7 +386,7 @@ object PropertyTest extends ZIOSpecDefault {
               version = math.max(version, commit.version)
               addFiles.append(
                 clientModel.AddFileForCDF(
-                  url = a.url,
+                  url = urlTransformation(a.url),
                   id = a.id,
                   partitionValues = a.partitionValues,
                   size = a.size,
@@ -388,7 +397,7 @@ object PropertyTest extends ZIOSpecDefault {
               )
             case c: clientModel.AddCDCFile =>
               version = math.max(version, c.version)
-              cdcFiles.append(c)
+              cdcFiles.append(c.copy(url = urlTransformation(c.url)))
             case r: clientModel.RemoveFile =>
               version = math.max(version, r.version)
               removeFiles.append(r)
@@ -397,7 +406,7 @@ object PropertyTest extends ZIOSpecDefault {
               if (includeHistoricalMetadata) additionalMetadatas.append(m)
             case a: clientModel.AddFileForCDF =>
               version = math.max(version, a.version)
-              addFiles.append(a)
+              addFiles.append(a.copy(url = urlTransformation(a.url)))
             case other =>
               throw new IllegalStateException(
                 s"Unexpected action encountered in CDF: $other"

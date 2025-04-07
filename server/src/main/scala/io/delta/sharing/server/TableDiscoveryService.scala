@@ -65,6 +65,7 @@ class TableDiscoveryService(serverConfig: ServerConfig) {
 
         TableConfig(
           location = path.toString,
+          externalLocationTemplate = tableConfig.externalLocationTemplate,
           id = generateTableId(path.toString),
           historyShared = tableConfig.historyShared,
           startVersion = tableConfig.startVersion,

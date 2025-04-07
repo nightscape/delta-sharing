@@ -73,7 +73,7 @@ class DeltaSharedTableKernel(
     queryTablePageTokenTtlMs: Int,
     refreshTokenTtlMs: Int) extends DeltaSharedTableProtocol {
 
-  protected val tablePath: Path = new Path(tableConfig.getLocation)
+  protected val tablePath: Path = new Path(tableConfig.location)
 
   // The ordinals of the fields in the Kernel scan file, used to extract ColumnVectors
   // from ColumnarBatch.
@@ -86,10 +86,10 @@ class DeltaSharedTableKernel(
   private val JsonPredicateHintMaxTreeDepth = 100
 
   private val fileSigner = withClassLoader {
-    val tablePath = new Path(tableConfig.getLocation)
+    val tablePath = new Path(tableConfig.clientLocation)
     val conf = new Configuration()
     val fs = tablePath.getFileSystem(conf)
-    val (table, engine) = getTableAndEngine()
+    val (table, engine) = getTableAndEngine(tablePath.toString)
 
     val dataPath = new URI(table.getPath(engine))
 
@@ -136,11 +136,11 @@ class DeltaSharedTableKernel(
 
   // Get the table and table client (engine).
   // Uses the delta-kernel default implementation of link engine based on Hadoop APIs
-  private def getTableAndEngine(): (Table, Engine) = {
+  private def getTableAndEngine(tablePathString: String = tablePath.toString): (Table, Engine) = {
     val engine = DefaultEngine.create(
       new Configuration()
     )
-    val table = Table.forPath(engine, tablePath.toString)
+    val table = Table.forPath(engine, tablePathString)
 
     (table, engine)
   }
@@ -446,7 +446,7 @@ class DeltaSharedTableKernel(
     val addFileVectors = getAddFileColumnVectors(batchData)
     val selectionVector = scanFileBatch.getSelectionVector
     var addFileObjects = Seq[Object]()
-    val dataPath = new Path(table.getPath(engine))
+    val dataPath = new Path(Table.forPath(engine, tableConfig.clientLocation).getPath(engine))
 
     for (rowId <- 0 until batchSize) {
       if (limitHint.exists(_ <= numRecords)) {
