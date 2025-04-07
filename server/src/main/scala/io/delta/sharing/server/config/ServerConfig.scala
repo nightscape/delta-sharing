@@ -24,6 +24,7 @@ import scala.beans.BeanProperty
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
+import org.apache.hadoop.fs.Path
 
 /** A trait that requires to implement */
 trait ConfigItem {
@@ -233,13 +234,35 @@ case class SchemaConfig(
 case class TableConfig(
     @BeanProperty var name: String,
     @BeanProperty var location: String,
+    // Optional template for generating external location
+    @BeanProperty var externalLocationTemplate: String = null,
     @BeanProperty var id: String = "",
     @BeanProperty var historyShared: Boolean = false,
-    @BeanProperty var startVersion: Long = 0,
+    @BeanProperty var startVersion: Long = 0
 ) extends ConfigItem {
 
   def this() {
     this(null, null, null)
+  }
+
+  /**
+   * Transform an internal path to a client-accessible URL.
+   * If externalUrlTemplate is set, applies the template transformation.
+   * Otherwise, returns the original path as a URI string.
+   */
+  def clientLocation: String = {
+    if (externalLocationTemplate != null && externalLocationTemplate.nonEmpty) {
+      val uri = new java.net.URI(location)
+      val clientLoc = externalLocationTemplate
+        .replace("{scheme}", uri.getScheme)
+        .replace("{host}", uri.getHost)
+        .replace("{port}", Option(uri.getPort).filter(_ != -1).map(_.toString).getOrElse(""))
+        .replace("{path}", uri.getPath)
+        .replace("{filename}", new Path(uri).getName)
+      clientLoc
+    } else {
+      location
+    }
   }
 
   override def checkConfig(): Unit = {

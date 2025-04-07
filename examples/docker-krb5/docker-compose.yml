@@ -121,7 +121,7 @@ services:
       - "9867:9867"
 
   spark-job:
-    image: bitnami/spark:latest
+    image: bitnami/spark:3.5
     depends_on:
       namenode:
         condition: service_healthy
