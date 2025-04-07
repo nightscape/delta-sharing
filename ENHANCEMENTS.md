@@ -29,6 +29,11 @@ This fork introduces enhancements to the Delta Sharing server, focusing on enter
   * Full topology configurations
 * Files: [examples/docker-knox/](./examples/docker-knox/)
 
+### External URL Template Support
+* Allows configuring a different URL template for external access (e.g., through a gateway) than for internal
+* When data files need to be accessed through Knox or another gateway with URL rewriting
+* Files: [ServerConfig.scala](./server/src/main/scala/io/delta/sharing/server/config/ServerConfig.scala), [DeltaSharedTableKernel.scala](./server/src/main/scala/io/delta/sharing/kernel/internal/DeltaSharedTableKernel.scala)
+
 ## Testing Infrastructure
 
 ### Property-Based Testing Framework

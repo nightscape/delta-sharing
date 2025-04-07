@@ -59,9 +59,9 @@ object StackRegistry {
       ExposedService("datanode", 9865),
       ExposedService("knox-gateway", 8443)
     ),
-    kerberosRealm = Some("HADOOP.LOCAL"),
+    kerberosRealm = None,
     usesKnox = true,
-    needsKerberosLogin = true
+    needsKerberosLogin = false
   )
 
   /**

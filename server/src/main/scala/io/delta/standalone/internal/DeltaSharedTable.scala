@@ -95,7 +95,7 @@ class DeltaSharedTable(
   }
 
   private val fileSigner = withClassLoader {
-    val tablePath = new Path(tableConfig.getLocation)
+    val tablePath = new Path(tableConfig.clientLocation)
     val fs = tablePath.getFileSystem(conf)
     fs match {
       case _: S3AFileSystem =>
@@ -490,7 +490,7 @@ class DeltaSharedTable(
         }
         val filteredFiles = filteredIndexedFiles.map {
           case (addFile, _) =>
-            val cloudPath = absolutePath(deltaLog.dataPath, addFile.path)
+            val cloudPath = absolutePath(new Path(tableConfig.clientLocation), addFile.path)
             val signedUrl = fileSigner.sign(cloudPath)
             minUrlExpirationTimestamp = minUrlExpirationTimestamp.min(signedUrl.expirationTimestamp)
             getResponseAddFile(
@@ -606,7 +606,7 @@ class DeltaSharedTable(
               actions.append(getEndStreamAction(tokenGenerator(v, idx), minUrlExpirationTimestamp))
               return actions.toSeq
             }
-            val preSignedUrl = fileSigner.sign(absolutePath(deltaLog.dataPath, a.path))
+            val preSignedUrl = fileSigner.sign(absolutePath(new Path(tableConfig.clientLocation), a.path))
             minUrlExpirationTimestamp =
               minUrlExpirationTimestamp.min(preSignedUrl.expirationTimestamp)
             actions.append(

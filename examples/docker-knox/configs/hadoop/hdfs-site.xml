@@ -323,5 +323,9 @@
     <name>fs.knoxswebhdfs.https.enabled</name>
     <value>true</value>
   </property>
+  <property>
+    <name>knox.webhdfs.context</name>
+    <value>/gateway/sandbox</value>
+  </property>
 
 </configuration>
