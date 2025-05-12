@@ -1,0 +1,7 @@
+*.p12
+*.keytab
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx

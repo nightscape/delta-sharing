@@ -1,0 +1,206 @@
+services:
+
+  kerberos-server:
+    image: ${DOCKER_REGISTRY}gcavalcante8808/krb5-server
+    restart: unless-stopped
+    ports:
+      - "88:88"
+      - "88:88/udp"
+      - "464:464"
+      - "749:749"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -znv -w1 127.0.0.1 88 && nc -znv -w1 127.0.0.1 464 && nc -znv -w1 127.0.0.1 749" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    env_file:
+      - ./env-files/kerberos.env
+    volumes:
+    - ./scripts/kerberos/krb5-entrypoint.sh:/docker-entrypoint.sh
+    - krb5kdc-data:/var/lib/krb5kdc
+
+  knox-gateway:
+    image: ${DOCKER_REGISTRY}farberg/apache-knox-docker:1.5.0
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+      - "15005:5005"
+    hostname: knox-gateway.localtest.me
+    depends_on:
+      kerberos-server:
+        condition: service_healthy
+    environment:
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/etc/security/hadoop-truststores/truststore.p12 -Djavax.net.ssl.trustStorePassword=thekeystorespasswd"
+      SSL_TRUSTSTORES_PATH: /etc/security/hadoop-truststores
+      KNOX_GATEWAY_DBG_OPTS: "-Xdebug -Xrunjdwp:transport=dt_socket,address=5005,server=y,suspend=n"
+    volumes:
+      - ./configs/knox/conf:/opt/knox/conf
+      - ./configs/knox/data/services/webhdfs:/opt/knox/data/services/webhdfs
+      - ./configs/kerberos/krb5.conf:/etc/krb5.conf
+      - ./configs/kerberos/krb5JAASLogin.conf:/etc/krb5JAASLogin.conf
+      - truststore-volume:/etc/security/hadoop-truststores
+    post_start:
+      - command: |
+          bash -c '(echo "Waiting for Knox to start..." && \
+          while [ ! -f /opt/knox/data/security/keystores/gateway.jks ]; do sleep 1; done && \
+          /opt/knox/bin/knoxcli.sh export-cert --type PEM && \
+          keytool -delete -alias knox-gateway.localtest.me -keystore /etc/security/hadoop-truststores/truststore.p12 -storepass thekeystorespasswd ; \
+          keytool -import -alias knox-gateway.localtest.me -keystore /etc/security/hadoop-truststores/truststore.p12 -storetype PKCS12 -storepass thekeystorespasswd -file /opt/knox/data/security/keystores/gateway-identity.pem -noprompt) > /tmp/post_start.log 2>&1'
+
+  delta-sharing-server:
+    image: ${DOCKER_REGISTRY}nightscape/delta-sharing-server:1.1.11
+    platform: linux/amd64
+    cpus: 1
+    mem_limit: 1G
+    ports:
+      - "8001:8001"
+      - "15007:5005"
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+    environment:
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/etc/security/hadoop-truststores/truststore.p12 -Djavax.net.ssl.trustStorePassword=thekeystorespasswd -Djava.security.krb5.conf=/etc/krb5/krb5.conf -Dsun.security.krb5.debug=true -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
+      SSL_TRUSTSTORES_PATH: /etc/security/hadoop-truststores
+      KNOX_WEBHDFS_CONTEXT: /gateway/sandbox
+      KNOX_WEBHDFS_USERNAME: hadoop
+      KNOX_WEBHDFS_PASSWORD: hadoop-password
+    volumes:
+      - ./configs/delta-sharing/server-config.yaml:/server-config.yaml
+      - ./configs/kerberos/krb5.conf:/etc/krb5/krb5.conf
+      - truststore-volume:/etc/security/hadoop-truststores
+    env_file:
+      - ./env-files/kerberos.env
+      - ./env-files/hadoop.env
+  namenode:
+    build:
+      context: .
+      dockerfile: hadoop.dockerfile
+    user: hdfs
+    tty: false
+    cpus: 1
+    mem_limit: 1G
+    volumes:
+      - ./configs/hadoop:/etc/hadoop/conf
+      - ./configs/kerberos/krb5.conf:/etc/krb5/krb5.conf
+      - ./scripts/hadoop:/opt/hadoop/scripts
+      - truststore-volume:/etc/security/hadoop-truststores
+    tmpfs:
+      - /opt/hadoop/hadoop_data:uid=1000,gid=1000,mode=770,size=10G
+    hostname: namenode.localtest.me
+    env_file:
+      - ./env-files/kerberos.env
+      - ./env-files/hadoop.env
+      - ./env-files/hdfs.env
+    environment:
+      - EXTERNAL_HOSTNAME=namenode.localtest.me
+      - SSL_TRUSTSTORES_PATH=/etc/security/hadoop-truststores
+    command:
+      - /bin/bash
+      - --verbose
+      - -c
+      - |
+        ~/scripts/namenode-init.sh
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:9871"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      kerberos-server:
+        condition: service_healthy
+
+  datanode:
+    build:
+      context: .
+      dockerfile: hadoop.dockerfile
+    user: hdfs
+    cpus: 1
+    mem_limit: 1G
+    volumes:
+      - ./configs/hadoop:/etc/hadoop/conf
+      - ./configs/kerberos/krb5.conf:/etc/krb5/krb5.conf
+      - ./scripts/hadoop:/opt/hadoop/scripts
+      - truststore-volume:/etc/security/hadoop-truststores
+    tmpfs:
+      - /opt/hadoop/hadoop_data:uid=1000,gid=1000,mode=770,size=10G
+    env_file:
+      - ./env-files/kerberos.env
+      - ./env-files/hadoop.env
+      - ./env-files/hdfs.env
+    environment:
+      - EXTERNAL_HOSTNAME=datanode.localtest.me
+      - SSL_TRUSTSTORES_PATH=/etc/security/hadoop-truststores
+    command:
+      - /bin/bash
+      - --verbose
+      - -c
+      - |
+         ~/scripts/datanode-init.sh
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:9865"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      namenode:
+        condition: service_healthy
+      kerberos-server:
+        condition: service_healthy
+
+  spark-job:
+    image: bitnami/spark:latest
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+    user: "1001"
+    environment:
+      SPARK_SSL_ENABLED: "true"
+      SPARK_SSL_KEYSTORE_FILE: "/opt/bitnami/spark/conf/certs/spark-keystore.p12"
+      SPARK_SSL_KEYSTORE_PASSWORD: "thekeystorespasswd"
+      SPARK_SSL_TRUSTSTORE_FILE: "/etc/security/hadoop-truststores/truststore.p12"
+      SPARK_SSL_TRUSTSTORE_PASSWORD: "thekeystorespasswd"
+      SPARK_JAVA_OPTS: "-Djavax.net.debug=ssl:handshake:verbose -Djavax.net.ssl.trustStore=/etc/security/hadoop-truststores/truststore.p12 -Djavax.net.ssl.trustStorePassword=thekeystorespasswd"
+      SSL_TRUSTSTORES_PATH: /etc/security/hadoop-truststores
+    volumes:
+      - truststore-volume:/etc/security/hadoop-truststores
+      - ./scripts/spark:/opt/spark/scripts
+    command:
+      - /bin/bash
+      - -c
+      - |
+        # First download dependencies with default truststore
+        spark-shell --packages io.delta:delta-spark_2.12:3.2.1 --repositories https://artifactory.dbgcloud.io/artifactory/stx-app-maven-prod,http://repol.maven.org/ --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog" --conf "spark.databricks.delta.properties.defaults.enableChangeDataFeed=true" --conf "spark.driver.extraJavaOptions=-Djavax.net.ssl.trustAll=true" -e "System.exit(0)"
+
+        # Then run the actual job with custom truststore
+        spark-shell \
+        --packages io.delta:delta-spark_2.12:3.2.1 \
+        --conf spark.driver.extraJavaOptions="-Djavax.net.ssl.trustStore=/etc/security/hadoop-truststores/truststore.p12 -Djavax.net.ssl.trustStorePassword=thekeystorespasswd" \
+        --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
+        --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog" \
+        --conf "spark.ssl.trustStore=/etc/security/hadoop-truststores/truststore.p12" \
+        --conf "spark.ssl.trustStorePassword=thekeystorespasswd" \
+        -i /opt/spark/scripts/import-data.scala
+    restart: "no"
+
+networks:
+  default:
+    name: localtest.me
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24
+
+volumes:
+  # Shared volume to mount on every hadoop host to list trusted self signed certificates...
+  truststore-volume:
+    driver: local
+    driver_opts:
+      type: none
+      device: ./truststore
+      o: bind
+  krb5kdc-data:

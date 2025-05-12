@@ -1,0 +1,28 @@
+---
+version: 1
+shares:
+- name: "test-share"
+  schemas:
+  - name: "test-schema"
+    tables:
+    - name: "test-table"
+      location: "knoxswebhdfs://knox-gateway.localtest.me/tmp/delta-test/delta-test-table"
+      id: "00000000-0000-0000-0000-000000000001"
+      historyShared: true
+      startVersion: 0
+authorization:
+  bearerToken: "dapi5e3574ec767ca1548ae5bbed1a2dc04d"
+host: "localhost"
+port: 8001
+endpoint: "/delta-sharing"
+preSignedUrlTimeoutSeconds: 3600
+deltaTableCacheSize: 10
+stalenessAcceptable: false
+evaluatePredicateHints: true
+evaluateJsonPredicateHints: true
+evaluateJsonPredicateHintsV2: true
+requestTimeoutSeconds: 30
+queryTablePageSizeLimit: 10000
+queryTablePageTokenTtlMs: 259200000
+refreshTokenTtlMs: 3600000
+defaultFormat: "parquet"

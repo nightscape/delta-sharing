@@ -37,4 +37,37 @@
     <value>10000</value>
   </property>
 
+  <property>
+    <name>fs.knoxwebhdfs.impl</name>
+    <value>org.apache.hadoop.hdfs.web.KnoxWebHdfsFileSystem</value>
+  </property>
+  <property>
+    <name>fs.AbstractFileSystem.knoxwebhdfs.impl</name>
+    <value>org.apache.hadoop.fs.KnoxWebHdfs</value>
+  </property>
+  <property>
+    <name>fs.knoxwebhdfs.impl.disable.cache</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.knoxwebhdfs.https.enabled</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.knoxswebhdfs.impl</name>
+    <value>org.apache.hadoop.hdfs.web.KnoxSWebHdfsFileSystem</value>
+  </property>
+  <property>
+    <name>fs.AbstractFileSystem.knoxswebhdfs.impl</name>
+    <value>org.apache.hadoop.fs.KnoxSWebHdfs</value>
+  </property>
+  <property>
+    <name>fs.knoxswebhdfs.impl.disable.cache</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>fs.knoxswebhdfs.https.enabled</name>
+    <value>true</value>
+  </property>
+
 </configuration>

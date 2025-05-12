@@ -1,1 +1,40 @@
+<configuration>
+
+  <!-- Server Certificate Store -->
+  <property>
+    <name>ssl.server.keystore.type</name>
+    <value>PKCS12</value>
+  </property>
+  <property>
+    <name>ssl.server.keystore.location</name>
+    <value>/etc/security/hadoop-keystores/hadoop.p12</value>
+  </property>
+  <property>
+    <name>ssl.server.keystore.password</name>
+    <value>thekeystorespasswd</value>
+  </property>
+
+  <property>
+    <name>ssl.server.keystore.keypassword</name>
+    <value>thekeystorespasswd</value>
+  </property>
+
+  <!-- Server Trust Store -->
+  <property>
+    <name>ssl.server.truststore.type</name>
+    <value>PKCS12</value>
+  </property>
+  <property>
+    <name>ssl.server.truststore.location</name>
     <value>/etc/security/hadoop-truststores/truststore.p12</value>
+  </property>
+  <property>
+    <name>ssl.server.truststore.password</name>
+    <value>thekeystorespasswd</value>
+  </property>
+  <property>
+    <name>ssl.server.truststore.reload.interval</name>
+    <value>10000</value>
+  </property>
+
+</configuration>

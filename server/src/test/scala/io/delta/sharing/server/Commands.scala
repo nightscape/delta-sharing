@@ -21,6 +21,13 @@ import zio.test.{Gen, TestResult, assertTrue}
 
 import java.util.concurrent.TimeUnit
 
+object Utils {
+
+  def standaloneSchemaToSparkSchema(schema: StructType): SparkStructType =
+    SparkDataType.fromJson(schema.toJson()).asInstanceOf[SparkStructType]
+}
+import Utils._
+
 object CreateManagedTableCommand {
   def gen(
            basePath: Path,
@@ -321,8 +328,6 @@ case class AddDataCommand(
       }
   } yield testResult
 
-    def standaloneSchemaToSparkSchema(schema: StructType): SparkStructType =
-    SparkDataType.fromJson(schema.toJson()).asInstanceOf[SparkStructType]
 
 }
 
@@ -453,6 +458,88 @@ case class ReadTableCommand(
       addFiles = newAddFiles,
       refreshToken = None
     )
+  }
+}
+
+object ReadTableSparkCommand {
+  def gen(
+           spark: SparkSession,
+           profilePath: String, // Path to the profile file for Spark access
+           state: DeltaState
+         ): Gen[Any, StatefulDeterministic.Command[Any, DeltaState]] =
+    for {
+      // Select a table that actually has data added (at least one commit beyond creation)
+      schemaAndTable <- Gen.fromIterable(state.tablesWithSchemas.filter(_._2.commits.length > 1).toList)
+      (schema, table) = schemaAndTable
+    } yield new ReadTableSparkCommand(
+      spark,
+      profilePath,
+      table.tableId,
+      schema,
+      "test-share" // Assuming fixed share name from test setup
+    )
+}
+
+case class ReadTableSparkCommand(
+                                  spark: SparkSession,
+                                  profilePath: String,
+                                  table: String,
+                                  schema: String,
+                                  share: String
+                                ) extends StatefulDeterministic.Command[Any, DeltaState] {
+  type E = Throwable
+
+  override def update(state: DeltaState): DeltaState = state // Reading does not change the state
+
+  override def executeAndCheck(
+                                state: DeltaState
+                              ): ZIO[Any, Throwable, TestResult] = {
+    val tableIdentifier = s"${profilePath}#${share}.${schema}.${table}"
+    ZIO.attempt {
+      println(s"Attempting Spark read for: $tableIdentifier") // Helpful debug output
+
+      // Read the table using Spark's deltaSharing format
+      val df = spark.read
+        .format("deltaSharing")
+        .load(tableIdentifier)
+
+      // Check 1: Compare the schema read by Spark with the expected schema from DeltaState
+      val expectedSchemaOpt = state.table(schema, table).flatMap(_.currentSchema)
+      val expectedSparkSchemaOpt = expectedSchemaOpt.map(standaloneSchemaToSparkSchema)
+      val actualSchema = df.schema
+
+      val schemaMatch = expectedSparkSchemaOpt.exists { expected =>
+        // Basic schema comparison (field names and types)
+        expected.fields.map(f => (f.name, f.dataType)).toSeq ==
+        actualSchema.fields.map(f => (f.name, f.dataType)).toSeq
+      }
+
+      if (!schemaMatch) {
+        // Print detailed schema comparison on mismatch for easier debugging
+        println(s"[ERROR] Schema mismatch for table: $tableIdentifier")
+        println("--- Expected Schema (from DeltaState) ---")
+        println(expectedSparkSchemaOpt.map(_.treeString).getOrElse("N/A"))
+        println("--- Actual Schema (read by Spark) ---")
+        println(actualSchema.treeString)
+        println("--------------------------------------")
+      }
+
+      // Check 2: Perform an action to ensure data can be accessed (e.g., count)
+      // This also helps verify that file access (potentially via Knox) works.
+      val rowCount = df.count()
+      println(s"Successfully read $rowCount rows from $tableIdentifier via Spark.")
+
+      // TODO: Potentially compare rowCount with expected count if DeltaState tracks it precisely
+
+      assertTrue(
+        schemaMatch // Assert that the schemas match
+        // && rowCount > 0 // Optional: Assert that some data was read if expected
+      )
+    }.tapError(e => ZIO.succeed {
+      // Log errors clearly for debugging test failures
+      println(s"[ERROR] Spark read failed for table $tableIdentifier: ${e.getClass.getName} - ${e.getMessage}")
+      e.printStackTrace() // Print stack trace for detailed debugging
+    })
   }
 }
 

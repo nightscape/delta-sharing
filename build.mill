@@ -155,6 +155,7 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
     ivy"io.delta:delta-kernel-api:$deltaVersion",
     ivy"io.delta:delta-kernel-defaults:$deltaVersion",
     ivy"org.apache.spark::spark-sql:$sparkVersion",
+    ivy"dev.mauch:knox-webhdfs:0.0.6",
     ivy"org.slf4j:jul-to-slf4j:1.7.36",
     ivy"org.slf4j:slf4j-api:1.7.36",
     ivy"org.slf4j:slf4j-simple:1.7.36",
@@ -175,8 +176,8 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
       "-Djavax.security.auth.useSubjectCredsOnly=false",
     )
   }
-  object test extends SbtTests with CommonTestModule {
-    val hedgehogVersion = "0.11.0"
+  trait TestBaseModule extends SbtTests with CommonTestModule {
+    def exampleDir: String
     def ivyDeps = Agg(
       ivy"org.scalatest::scalatest:3.2.19",
       ivy"io.delta::delta-core:2.4.0",
@@ -199,12 +200,22 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
       )
     }
     def prependShellScript = ""
-  }
-    override def resources: T[Seq[PathRef]] = T.sources {
-      Seq(
-        millSourcePath / "src" / "test" / "resources" / "docker",
+    override def resources: T[Seq[PathRef]] = Task.Sources {
+      super.resources() ++ Seq(
+        millSourcePath / os.up / "examples" / exampleDir / "configs" / "hadoop",
       ).map(PathRef(_))
     }
+  }
+  object test extends TestBaseModule {
+    def exampleDir: String = "docker"
+  }
+  object integration extends TestBaseModule {
+    def exampleDir: String = "docker-krb5"
+  }
+  object testKnox extends TestBaseModule {
+    def exampleDir: String = "docker-knox"
+  }
+
   object docker extends DockerConfig {
     import com.ofenbeck.mill.docker._
     def targetImage = JibImage.DockerDaemonImage("nightscape/delta-sharing-server")

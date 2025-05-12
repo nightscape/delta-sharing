@@ -26,6 +26,7 @@ import org.apache.hadoop.security.UserGroupInformation
 import io.delta.sharing.server.DockerLayer._
 import java.time.Instant
 import java.io.File
+import AuthLayer.Auth
 
 object PropertyTest extends ZIOSpecDefault {
   private val format = "delta"
@@ -33,7 +34,7 @@ object PropertyTest extends ZIOSpecDefault {
     SparkSession.builder().master("local[4]").getOrCreate()
 
   // Create the Hadoop configuration. Notice that later we update it to point to the HDFS cluster.
-  val hadoopConf = new Configuration()
+  def hadoopConf: Configuration = spark.sparkContext.hadoopConfiguration
 
   def findFreePort(): Task[Int] = {
     val socket = new ServerSocket(0)
@@ -97,8 +98,11 @@ object PropertyTest extends ZIOSpecDefault {
       } yield DeltaServerEnvironment(port, profileString, serverConfig)
     }
 
-  val serverLayer
-      : ZLayer[Scope with DeltaServerEnvironment with FileSystem, Throwable, TestServerConfig] =
+  val serverLayer: ZLayer[
+    Scope with DeltaServerEnvironment with FileSystem,
+    Throwable,
+    TestServerConfig
+  ] =
     ZLayer.scoped {
       for {
         env <- ZIO.service[DeltaServerEnvironment]
@@ -106,13 +110,12 @@ object PropertyTest extends ZIOSpecDefault {
         promise <- Promise.make[Throwable, Unit]
         fiber <- (for {
           stopServer <- ZIO.attempt {
-            println("serverConfig=" + env.serverConfig)
             val server = DeltaSharingService.start(env.serverConfig)
             new Runnable {
               def run(): Unit = server.stop()
             }
           }
-          _ = println(s"Server is running on port ${env.port}")
+          _ <- ZIO.logInfo(s"Server is running on port ${env.port}")
           _ <- promise.succeed(())
         } yield stopServer).fork
         _ <- promise.await.timeoutFail(
@@ -129,30 +132,27 @@ object PropertyTest extends ZIOSpecDefault {
     }
 
   val hadoopFileSystemLayer: ZLayer[
-    Scope with ServiceEndpoints with Subject,
+    Scope with DockerEnv with Auth with Configuration,
     Throwable,
     FileSystem
   ] =
     ZLayer.scoped {
       ZIO.acquireRelease {
         for {
-          endpoints <- ZIO.service[ServiceEndpoints]
-          subject <- ZIO.service[Subject]
-          hdfsUri =
-            s"hdfs://${endpoints.namenodeHost}:${endpoints.namenodePort}"
-          _ <- ZIO.attempt {
-            val configs = Map(
-              "fs.defaultFS" -> hdfsUri,
-              "hadoop.security.authentication" -> "kerberos",
-              "hadoop.rpc.protection" -> "privacy",
-              "dfs.namenode.kerberos.principal" -> s"nn/${endpoints.namenodeContainerName}@HADOOP.LOCAL"
-            )
-            configs.foreach { case (k, v) => hadoopConf.set(k, v)}
-            // Initialize the security configuration and login using your keytab.
-            UserGroupInformation.setConfiguration(hadoopConf)
-            UserGroupInformation.loginUserFromSubject(subject)
+          endpoints <- ZIO.service[DockerEnv]
+          auth <- ZIO.service[Auth]
+          config <- ZIO.service[Configuration]
+          fs <- ZIO.attempt {
+            // Initialize the security configuration and login using the subject if available
+            UserGroupInformation.setConfiguration(config)
+            auth match {
+              case AuthLayer.KerberosAuth(subject) =>
+                UserGroupInformation.loginUserFromSubject(subject)
+              case _ =>
+                // No authentication needed
+            }
+            FileSystem.get(config)
           }
-          fs <- ZIO.attempt(FileSystem.get(hadoopConf))
         } yield fs
       } { fs =>
         ZIO.attempt(fs.close()).orDie // Ensure FileSystem is closed on release
@@ -189,6 +189,10 @@ object PropertyTest extends ZIOSpecDefault {
       }
     }
 
+  // Get the stack descriptor based on the environment variable
+  val stackDescriptor = StackRegistry.fromEnv()
+
+  // Create a combined layer with all the components
   val overallLayer: ZLayer[
     Scope,
     Throwable,
@@ -196,25 +200,28 @@ object PropertyTest extends ZIOSpecDefault {
       with TestTables
       with DeltaServerEnvironment
       with TestServerConfig
-      with ServiceEndpoints
-      with Subject
+      with DockerEnv
+      with Auth
+      with Configuration
       with FileSystem
   ] =
-    ZLayer.makeSome[
-      Scope,
-      Scope
+    ZLayer.make[
+        Scope
         with TestTables
         with DeltaServerEnvironment
         with TestServerConfig
-        with ServiceEndpoints
-        with Subject
+        with DockerEnv
+        with Auth
+        with Configuration
         with FileSystem
     ](
+      Scope.default,
+      DockerLayer.live(stackDescriptor),
+      AuthLayer.live(stackDescriptor),
+      HadoopConfLayer.live(stackDescriptor),
       testTablesLayer,
       serverConfigLayer,
       serverLayer,
-      hadoopPreStartedLayer,
-      kerberosSubjectLayer,
       hadoopFileSystemLayer
     )
 
@@ -495,6 +502,7 @@ object PropertyTest extends ZIOSpecDefault {
           ),
           AddDataCommand.gen(spark, state),
           ReadTableCommand.gen(client, state),
+          ReadTableSparkCommand.gen(spark, profilePath.toString, state),
         )
       }
       result <- checkN(10)(

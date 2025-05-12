@@ -93,31 +93,32 @@ private[sharing] class DeltaSharingFileSystem extends FileSystem with Logging {
   // delta-sharing:///<url encoded table path>/<url encoded file id>/<size>
   // ```
   override def open(f: Path, bufferSize: Int): FSDataInputStream = {
-    val path = DeltaSharingFileSystem.decode(f)
+    val decodedPath = DeltaSharingFileSystem.decode(f)
     val fetcher =
-      new PreSignedUrlFetcher(preSignedUrlCacheRef, path.tablePath, path.fileId, refreshThresholdMs)
-
-    if (getConf.getBoolean("spark.delta.sharing.loadDataFilesInMemory", false)) {
-      val start = System.currentTimeMillis()
-      // `InMemoryHttpInputStream` loads the content into the memory immediately, so we don't need
-      // to refresh urls.
-      val stream = new FSDataInputStream(new InMemoryHttpInputStream(new URI(fetcher.getUrl())))
-      logDebug(s"Took ${(System.currentTimeMillis() - start)/1000}s to build " +
-        s"InMemoryHttpInputStream for delta sharing path $path.")
-      stream
-    } else {
-      logDebug(s"opening delta sharing path [$path] with RandomAccessHttpInputStream, " +
-        s"with bufferSize:[$bufferSize].")
-      new FSDataInputStream(
-        new RandomAccessHttpInputStream(
-          httpClient,
-          fetcher,
-          path.fileSize,
-          statistics,
-          numRetries,
-          maxRetryDurationMillis
-        )
+      new PreSignedUrlFetcher(
+        preSignedUrlCacheRef,
+        decodedPath.tablePath,
+        decodedPath.fileId,
+        refreshThresholdMs
       )
+
+    val fileUrlString = fetcher.getUrl()
+    val fileUri = new URI(fileUrlString)
+    val hadoopPath = new Path(fileUri)
+    val conf = getConf()
+
+    logInfo(
+      s"Opening ${hadoopPath} for delta sharing path ${f} using FileSystem.get. " +
+      s"Target URI: ${fileUri}, Buffer size: ${bufferSize}"
+    )
+
+    try {
+      val fs = FileSystem.get(fileUri, conf)
+      fs.open(hadoopPath, bufferSize)
+    } catch {
+      case e: Exception =>
+        logError(s"Failed to open delta sharing path: $f (resolved URI: $fileUri)", e)
+        throw e
     }
   }
 
