@@ -192,6 +192,7 @@ lazy val server = (project in file("server"))
   java8Settings,
   scalaStyleSettings,
   releaseSettings,
+  serverTestSettings("docker-knox"), // Default to docker-knox for main tests
   dockerUsername := Some("deltaio"),
   dockerBuildxPlatforms := Seq("linux/arm64", "linux/amd64"),
   scriptClasspath ++= Seq("../conf"),
@@ -254,6 +255,7 @@ lazy val server = (project in file("server"))
     "com.fasterxml.jackson.core" % "jackson-databind" % "2.15.2",
     "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2",
     "com.fasterxml.jackson.dataformat" % "jackson-dataformat-yaml" % "2.15.2",
+    "dev.mauch" % "knox-webhdfs" % "0.0.6",
     "org.json4s" %% "json4s-jackson" % "3.7.0-M11" excludeAll(
       (Seq(
         ExclusionRule("com.fasterxml.jackson.core"),

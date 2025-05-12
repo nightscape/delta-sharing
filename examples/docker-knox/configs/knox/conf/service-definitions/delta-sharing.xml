@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<serviceDefinitions>
+    <serviceDefinition>
+        <service name="delta-sharing" role="DELTA_SHARING" version="1.0.0">
+            <dispatch classname="org.apache.knox.gateway.dispatch.DefaultDispatch" ha-classname="org.apache.knox.gateway.dispatch.DefaultDispatch" use-two-way-ssl="false"/>
+            <metadata>
+                <context>/delta-sharing</context>
+                <description>Delta Sharing protocol server for secure data sharing</description>
+                <samples>
+                    <sample>
+                        <description>List shares</description>
+                        <method>GET</method>
+                        <path>shares</path>
+                    </sample>
+                    <sample>
+                        <description>List schemas in a share</description>
+                        <method>GET</method>
+                        <path>shares/{share}/schemas</path>
+                    </sample>
+                    <sample>
+                        <description>List tables in a schema</description>
+                        <method>GET</method>
+                        <path>shares/{share}/schemas/{schema}/tables</path>
+                    </sample>
+                    <sample>
+                        <description>Query table metadata</description>
+                        <method>GET</method>
+                        <path>shares/{share}/schemas/{schema}/tables/{table}/metadata</path>
+                    </sample>
+                </samples>
+                <shortDesc>Delta Sharing</shortDesc>
+                <type>API</type>
+            </metadata>
+            <routes>
+                <route path="/delta-sharing/**?**">
+                    <rewrite apply="DELTA_SHARING/delta-sharing/inbound/root" to="request.url"/>
+                </route>
+            </routes>
+            <testURLs>
+                <testURL>/delta-sharing/shares</testURL>
+            </testURLs>
+        </service>
+        <rules>
+            <rule dir="IN" name="DELTA_SHARING/delta-sharing/inbound/root" pattern="*://*:*/**/delta-sharing/{path=**}?{**}">
+                <rewrite template="{$serviceUrl[DELTA_SHARING]}/{path=**}?{**}"/>
+            </rule>
+            <rule dir="IN" name="DELTA_SHARING/delta-sharing/inbound/root" pattern="*://*:*/**/delta-sharing/?{**}">
+                <rewrite template="{$serviceUrl[DELTA_SHARING]}/?{**}"/>
+            </rule>
+        </rules>
+    </serviceDefinition>
+</serviceDefinitions>

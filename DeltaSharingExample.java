@@ -1,11 +1,12 @@
 ///usr/bin/env jbang
-//DEPS io.delta:delta-sharing-client_2.12:1.2.2
+//DEPS io.delta:delta-sharing-client_2.12:1.3.0
+//DEPS dev.mauch:knox-webhdfs:0.0.6
 //DEPS org.apache.spark:spark-sql_2.12:3.3.4
 //DEPS org.scala-lang:scala-library:2.12.20
 //DEPS org.apache.hadoop:hadoop-client:3.3.5
 //DEPS org.apache.parquet:parquet-column:1.12.2
 //DEPS org.apache.parquet:parquet-hadoop-bundle:1.12.2
-//RUNTIME_OPTIONS -Djavax.net.ssl.trustStore=./examples/docker-krb5/truststore/truststore.p12
+//RUNTIME_OPTIONS -Djavax.net.ssl.trustStore=./truststore/truststore.p12
 //RUNTIME_OPTIONS -Djavax.net.ssl.trustStorePassword=thekeystorespasswd
 
 import io.delta.sharing.client.*;
@@ -17,6 +18,7 @@ import scala.collection.JavaConverters$;
 import scala.collection.Seq;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.convert.GroupRecordConverter;
@@ -32,16 +34,26 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.ServiceLoader;
 import java.util.UUID;
 
 public class DeltaSharingExample {
     public static void main(String[] args) {
+        // Add ServiceLoader for FileSystem
+        ServiceLoader<FileSystem> loader = ServiceLoader.load(FileSystem.class);
+        System.out.println("Discovered FileSystem implementations:");
+        for (FileSystem fs : loader) {
+            System.out.println(fs.getClass().getName());
+        }
+        System.out.println("------------------------------------");
+
         DeltaSharingProfileProvider profileProvider = new SimpleDeltaSharingProfileProvider();
         DeltaSharingRestClient client = new DeltaSharingRestClient(
             profileProvider,
             120,                            // timeoutInSeconds
             10,                             // numRetries
             Long.MAX_VALUE,                 // maxRetryDuration
+            1000,                           // retrySleepInterval
             true,                           // sslTrustAll
             false,                          // forStreaming
             "parquet",                    // responseFormat
@@ -150,7 +162,9 @@ public class DeltaSharingExample {
             return scheme.equalsIgnoreCase("hdfs") ||
                    scheme.equalsIgnoreCase("file") ||
                    (scheme.equalsIgnoreCase("webhdfs") && !urlString.contains("?")) ||
-                   (scheme.equalsIgnoreCase("swebhdfs") && !urlString.contains("?"));
+                   (scheme.equalsIgnoreCase("swebhdfs") && !urlString.contains("?")) ||
+                   scheme.equalsIgnoreCase("knoxwebhdfs") ||
+                   scheme.equalsIgnoreCase("knoxswebhdfs");
         } catch (URISyntaxException e) {
             return false;
         }

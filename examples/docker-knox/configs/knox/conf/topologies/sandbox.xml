@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<topology>
+  <gateway>
+    <provider>
+      <role>authentication</role>
+      <name>ShiroProvider</name>
+      <enabled>true</enabled>
+      <param>
+        <!--
+        session timeout in minutes, this is really idle timeout,
+        defaults to 30mins, if the property value is not defined,,
+        current client authentication would expire if client idles contiuosly for more than this value
+        -->
+        <name>sessionTimeout</name>
+        <value>30</value>
+      </param>
+      <param>
+        <name>main.ldapRealm</name>
+        <value>org.apache.knox.gateway.shirorealm.KnoxLdapRealm</value>
+      </param>
+      <param>
+        <name>main.ldapContextFactory</name>
+        <value>org.apache.knox.gateway.shirorealm.KnoxLdapContextFactory</value>
+      </param>
+      <param>
+        <name>main.ldapRealm.contextFactory</name>
+        <value>$ldapContextFactory</value>
+      </param>
+      <param>
+        <name>main.ldapRealm.userDnTemplate</name>
+        <value>uid={0},ou=users,dc=hadoop,dc=apache,dc=org</value>
+      </param>
+      <param>
+        <name>main.ldapRealm.contextFactory.url</name>
+        <value>ldap://localhost:33389</value> <!-- Default from template; adjust if external LDAP server is used on a different host/port -->
+      </param>
+      <param>
+        <name>main.ldapRealm.contextFactory.authenticationMechanism</name>
+        <value>simple</value> <!-- Assuming simple bind; change if Kerberos/GSSAPI needed for LDAP bind -->
+      </param>
+      <param>
+        <name>urls./**</name>
+        <value>authcBasic</value> <!-- Or change to appropriate mechanism like 'kerberos' if needed -->
+      </param>
+    </provider>
+    <provider>
+      <role>authorization</role>
+      <name>AclsAuthz</name>
+      <enabled>true</enabled>
+      <param>
+        <name>knox.acl</name>
+        <value>hadoop;*;*</value>
+      </param>
+    </provider>
+    <provider>
+      <role>identity-assertion</role>
+      <name>Default</name> <!-- Assumes Knox principal matches user principal -->
+      <enabled>true</enabled>
+    </provider>
+    <!-- Add Kerberos provider if backend services require Kerberos delegation -->
+    <!--
+    <provider>
+      <role>identity-assertion</role>
+      <name>HadoopAuth</name>
+      <enabled>true</enabled>
+      <param>
+        <name>config.prefix</name>
+        <value>hadoop.auth.config</value>
+      </param>
+      <param>
+        <name>hadoop.auth.config.signature.secret</name>
+        <value>knox-secret-key</value>
+      </param>
+      <param>
+        <name>hadoop.auth.config.type</name>
+        <value>kerberos</value>
+      </param>
+      <param>
+        <name>hadoop.auth.config.kerberos.principal</name>
+        <value>HTTP/_HOST@${REALM}</value> Replace with Knox service principal
+      </param>
+      <param>
+        <name>hadoop.auth.config.kerberos.keytab</name>
+        <value>/etc/security/keytabs/spnego.service.keytab</value> Replace with Knox service keytab path
+      </param>
+    </provider>
+    -->
+  </gateway>
+  <service>
+    <role>NAMENODE</role>
+    <url>hdfs://namenode.localtest.me:8020</url>
+  </service>
+  <service>
+    <role>WEBHDFS</role>
+    <url>https://namenode.localtest.me:9871/webhdfs</url>
+  </service>
+  <service>
+    <role>HDFSUI</role>
+    <url>https://namenode.localtest.me:9871</url>
+  </service>
+  <service>
+    <role>DELTA-SHARING-SERVER</role>
+    <url>http://delta-sharing-server:8000</url>
+  </service>
+</topology>

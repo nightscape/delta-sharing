@@ -24,6 +24,12 @@ import javax.security.auth.callback._
 
 object DockerLayer {
 
+  // Type alias for convenience
+  type DockerEnv = ServiceEndpoints
+
+  /**
+   * Service endpoints accessible after docker-compose has started.
+   */
   case class ServiceEndpoints(
       kerberosKdcHost: String,
       kerberosKdcPort: Int,
@@ -31,26 +37,37 @@ object DockerLayer {
       kerberosAdminPort: Int,
       namenodeHost: String,
       namenodePort: Int,
-      namenodeContainerName: String
+      namenodeContainerName: String,
+      knoxGatewayUrl: Option[String] = None
   )
 
-  val hadoopTestContainerLayer: ZLayer[Scope, Throwable, ServiceEndpoints] =
+  /**
+   * Creates a layer that provides ServiceEndpoints based on the stack descriptor.
+   * Uses either the pre-started environment or launches a new one via docker-compose.
+   */
+  def live(desc: StackDescriptor): ZLayer[Scope, Throwable, DockerEnv] =
+    if (sys.env.contains("NAMENODE_HOST")) {
+      preStarted(desc)
+    } else {
+      viaCompose(desc)
+    }
+
+  /**
+   * Creates a layer that provides ServiceEndpoints by starting the docker-compose environment.
+   */
+  private def viaCompose(desc: StackDescriptor): ZLayer[Scope, Throwable, DockerEnv] =
     ZLayer.fromZIO {
+      ZIO.logInfo(s"Starting docker-compose from ${desc.composeDir}") *>
       ZIOTestcontainers
         .toZIO(
           new DockerComposeContainer(
-            new File("server/src/test/resources/docker-compose.yml"),
-            List(
-              new ExposedService("kerberos-server", 88),
-              new ExposedService("kerberos-server", 749),
-              new ExposedService("namenode", 8020),
-              new ExposedService("datanode", 9865)
-            ),
+            desc.composeDir.resolve("docker-compose.yml").toFile,
+            desc.exposedServices,
             tailChildContainers = true
           )
         )
         .map { docker =>
-          ServiceEndpoints(
+          val endpoints = ServiceEndpoints(
             kerberosKdcHost = docker.getServiceHost("kerberos-server", 88),
             kerberosKdcPort = docker.getServicePort("kerberos-server", 88),
             kerberosAdminHost = docker.getServiceHost("kerberos-server", 749),
@@ -58,21 +75,36 @@ object DockerLayer {
             namenodeHost = docker.getServiceHost("namenode", 8020),
             namenodePort = docker.getServicePort("namenode", 8020),
             namenodeContainerName =
-              docker.getContainerByServiceName("namenode").get.getContainerId
+              docker.getContainerByServiceName("namenode").get.getContainerId,
+            knoxGatewayUrl = if (desc.usesKnox) {
+              val host = docker.getServiceHost("knox-gateway", 8443)
+              if (host.nonEmpty) Some(s"https://$host:8443/") else None
+            } else None
           )
-        }
+
+          ZIO.logInfo(s"Docker environment started with namenode at ${endpoints.namenodeHost}:${endpoints.namenodePort}") *>
+          ZIO.succeed(endpoints)
+        }.flatten
     }
-  val hadoopPreStartedLayer: ZLayer[Scope, Throwable, ServiceEndpoints] =
-    ZLayer.succeed {
-      ServiceEndpoints(
-        kerberosKdcHost = "localhost",
-        kerberosKdcPort = 88,
-        kerberosAdminHost = "localhost",
-        kerberosAdminPort = 749,
-        namenodeHost = "localhost",
-        namenodePort = 8020,
-        namenodeContainerName = sys.env("NAMENODE_HOST")
-      )
+
+  /**
+   * Creates a layer that provides ServiceEndpoints from a pre-started environment.
+   */
+  private def preStarted(desc: StackDescriptor): ZLayer[Scope, Throwable, DockerEnv] =
+    ZLayer.fromZIO {
+      ZIO.logInfo("Using pre-started environment") *>
+      ZIO.succeed {
+        ServiceEndpoints(
+          kerberosKdcHost = "localhost",
+          kerberosKdcPort = 88,
+          kerberosAdminHost = "localhost",
+          kerberosAdminPort = 749,
+          namenodeHost = "localhost",
+          namenodePort = 8020,
+          namenodeContainerName = sys.env("NAMENODE_HOST"),
+          knoxGatewayUrl = if (desc.usesKnox) sys.env.get("KNOX_GATEWAY_URL") else None
+        )
+      }
     }
 
   def createKrb5Conf(
@@ -129,8 +161,7 @@ object DockerLayer {
            |  debug=true;
            |};
            |""".stripMargin
-    println(s"Creating JAAS config for $principal")
-    println(confContent)
+
     val tempFile = Files.createTempFile("jaas-", ".conf").toFile
     val writer = new PrintWriter(tempFile)
     try {
@@ -141,68 +172,17 @@ object DockerLayer {
     tempFile
   }
 
-  /** ZLayer that logs in via Kerberos using JAAS and returns the authenticated
-    * Subject.
-    *
-    * This layer
-    *   - sets the necessary system properties for Kerberos,
-    *   - creates temporary configuration files using createKrb5Conf and
-    *     createJaasConf,
-    *   - logs in using a LoginContext with a password callback.
-    */
-  val kerberosSubjectLayer: ZLayer[ServiceEndpoints, Throwable, Subject] =
-    ZLayer.fromZIO {
-      for {
-        endpoints <- ZIO.service[ServiceEndpoints]
-        config <- ZIO.attempt {
-          val kerberosHost = endpoints.kerberosKdcHost
-          val kerberosPort = endpoints.kerberosKdcPort
-
-          val realm = "HADOOP.LOCAL"
-          val principal = s"tester@$realm"
-          val password = "tester"
-          // Enable Kerberos debug logging if needed
-          // System.setProperty("sun.security.krb5.debug", "true")
-          // Create temporary krb5.conf and JAAS config files
-          val krb5Conf = createKrb5Conf(kerberosHost, kerberosPort, realm)
-          val jaasConf = createJaasConf(principal)
-          System.setProperty(
-            "java.security.krb5.conf",
-            krb5Conf.getAbsolutePath
-          )
-          System.setProperty(
-            "java.security.auth.login.config",
-            jaasConf.getAbsolutePath
-          )
-
-          // Create a LoginContext using a custom callback handler for password-based login
-          val loginContext = new LoginContext(
-            "KrbLogin",
-            new NamePasswordKrbCallbackHandler(principal, password)
-          )
-          loginContext.login()
-          println("Login successful. Subject: " + loginContext.getSubject)
-          loginContext.getSubject
-        }
-      } yield config
-    }
-
-  /** A simple CallbackHandler for Kerberos password-based login.
-    *
-    * This implementation handles NameCallback and PasswordCallback by setting
-    * the provided username and password.
-    */
+  /**
+   * A simple CallbackHandler for Kerberos password-based login.
+   */
   class NamePasswordKrbCallbackHandler(username: String, password: String)
       extends CallbackHandler {
     override def handle(callbacks: Array[Callback]): Unit = {
-      println("Handling callbacks")
       callbacks.foreach {
         case nc: javax.security.auth.callback.NameCallback =>
-          println(s"NameCallback: ${nc.getName}")
           nc.setName(username)
         case pc: javax.security.auth.callback.PasswordCallback =>
           pc.setPassword(password.toCharArray)
-          println("PasswordCallback set")
         case other =>
           throw new UnsupportedOperationException(
             s"Unsupported callback: ${other.getClass.getName}"

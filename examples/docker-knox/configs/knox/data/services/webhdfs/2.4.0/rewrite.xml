@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rules>
+   <rule dir="OUT" name="WEBHDFS/webhdfs/outbound" pattern="hdfs://*:*/{path=**}?{**}" scope="WEBHDFS">
+      <rewrite template="{$frontend[url]}/webhdfs/v1/{path=**}?{**}"/>
+   </rule>
+   <rule dir="OUT" name="WEBHDFS/webhdfs/outbound" pattern="webhdfs://*:*/{path=**}?{**}">
+      <rewrite template="{$frontend[url]}/webhdfs/v1/{path=**}?{**}"/>
+   </rule>
+   <rule dir="OUT" name="WEBHDFS/webhdfs/outbound/namenode/headers/location" flow="OR">
+      <match pattern="{scheme}://{host}:{port}/{path=**}?offset=0?{**}">
+        <!-- Remove offset from the URL -->
+        <rewrite template="{$frontend[url]}/webhdfs/data/v1/{path=**}?{scheme}?host={$hostmap(host)}?{port}?{op}?{delegation}?{namenoderpcaddress}?{buffersize}"/>
+        <encrypt-query/>
+      </match>
+      <match pattern="{scheme}://{host}:{port}/{path=**}?{**}">
+        <rewrite template="{$frontend[url]}/webhdfs/data/v1/{path=**}?{scheme}?host={$hostmap(host)}?{port}?{**}"/>
+        <encrypt-query/>
+      </match>
+   </rule>
+   <rule dir="IN" name="WEBHDFS/webhdfs/inbound/hdfs" pattern="hdfs:/{path=**}?{**}">
+      <rewrite template="{$serviceMappedUrl[NAMENODE]}/{path=**}?{**}"/>
+   </rule>
+   <rule dir="IN" name="WEBHDFS/webhdfs/inbound/webhdfs" pattern="webhdfs:/{path=**}?{**}">
+      <rewrite template="{$serviceUrl[WEBHDFS]}/{path=**}?{**}"/>
+   </rule>
+   <rule dir="IN" name="WEBHDFS/webhdfs/inbound/namenode/root" pattern="*://*:*/**/webhdfs/{version}/?{**}">
+      <rewrite template="{$serviceUrl[WEBHDFS]}/{version}/?{**}"/>
+   </rule>
+   <rule dir="IN" name="WEBHDFS/webhdfs/inbound/namenode/file" pattern="*://*:*/**/webhdfs/{version}/{path=**}?{**}">
+      <rewrite template="{$serviceUrl[WEBHDFS]}/{version}/{path=**}?{**}"/>
+   </rule>
+   <rule dir="IN" name="WEBHDFS/webhdfs/inbound/namenode/home" pattern="*://*:*/**/webhdfs/{version}/~?{**}">
+      <rewrite template="{$serviceUrl[WEBHDFS]}/{version}/user/{$username}?{**}"/>
+   </rule>
+   <rule dir="IN" name="WEBHDFS/webhdfs/inbound/namenode/home/file" pattern="*://*:*/**/webhdfs/{version}/~/{path=**}?{**}">
+      <rewrite template="{$serviceUrl[WEBHDFS]}/{version}/user/{$username}/{path=**}?{**}"/>
+   </rule>
+   <rule dir="IN" name="WEBHDFS/webhdfs/inbound/datanode">
+      <decrypt-query/>
+      <match pattern="*://*:*/**/webhdfs/data/*/{path=**}?{scheme}?{host}?{port}?{**}"/>
+      <rewrite template="{scheme}://{host}:{port}/{path=**}?{**}"/>
+   </rule>
+   <filter name="WEBHDFS/webhdfs/outbound/namenode/headers">
+      <content type="application/x-http-headers">
+         <apply path="Location" rule="WEBHDFS/webhdfs/outbound/namenode/headers/location"/>
+      </content>
+      <content type="application/json">
+         <apply path="$.Location" rule="WEBHDFS/webhdfs/outbound/namenode/headers/location"/>
+      </content>
+   </filter>
+</rules>
