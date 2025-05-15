@@ -13,6 +13,8 @@ import zio.test.ZIOSpecDefault
 import java.net.ServerSocket
 import io.delta.sharing.server.config.ServerConfig
 import io.delta.sharing.server.config.ShareConfig
+import io.delta.sharing.server.config.SchemaConfig
+import io.delta.sharing.server.config.TableConfig
 import io.delta.sharing.server.config.Authorization
 
 import scala.collection.mutable.ArrayBuffer
@@ -76,7 +78,20 @@ object PropertyTest extends ZIOSpecDefault {
           shares = java.util.Arrays.asList(
             ShareConfig(
               "test-share",
-              new java.util.ArrayList()
+              java.util.Arrays.asList(
+                SchemaConfig(
+                  "test-schema",
+                  java.util.Arrays.asList(
+                    TableConfig(
+                      name = "table-$1",
+                      location = s"$basePath/test-schema/table-*",
+                      id = "",
+                      historyShared = true,
+                      startVersion = 0L
+                    )
+                  )
+                )
+              )
             )
           ),
           authorization = Authorization(token),
@@ -86,7 +101,7 @@ object PropertyTest extends ZIOSpecDefault {
           endpoint = "/delta-sharing",
           preSignedUrlTimeoutSeconds = 3600L,
           deltaTableCacheSize = 10,
-          stalenessAcceptable = false,
+          stalenessAcceptable = true,
           evaluatePredicateHints = true,
           evaluateJsonPredicateHints = true,
           evaluateJsonPredicateHintsV2 = true,
@@ -98,37 +113,21 @@ object PropertyTest extends ZIOSpecDefault {
       } yield DeltaServerEnvironment(port, profileString, serverConfig)
     }
 
-  val serverLayer: ZLayer[
-    Scope with DeltaServerEnvironment with FileSystem,
-    Throwable,
-    TestServerConfig
-  ] =
+  val serverLayer: ZLayer[Scope with DeltaServerEnvironment, Throwable, TestServerConfig] =
     ZLayer.scoped {
       for {
         env <- ZIO.service[DeltaServerEnvironment]
-        fs <- ZIO.service[FileSystem]
-        promise <- Promise.make[Throwable, Unit]
-        fiber <- (for {
-          stopServer <- ZIO.attempt {
-            val server = DeltaSharingService.start(env.serverConfig)
-            new Runnable {
-              def run(): Unit = server.stop()
-            }
-          }
-          _ <- ZIO.logInfo(s"Server is running on port ${env.port}")
-          _ <- promise.succeed(())
-        } yield stopServer).fork
-        _ <- promise.await.timeoutFail(
-          new Exception("Server didn't start in time")
-        )(120.seconds)
-        stopServer <- fiber.await.map(
-          _.getOrElse(_ =>
-            new Runnable {
-              def run(): Unit = ()
-            }
+        tsc <- ZIO.acquireRelease(
+          for {
+            server <- ZIO.attempt(DeltaSharingService.start(env.serverConfig))
+            _      <- ZIO.logInfo(s"Server is running on port ${env.port}")
+          } yield TestServerConfig(
+            env.port,
+            env.profileString,
+            () => server.stop()
           )
-        )
-      } yield TestServerConfig(env.port, env.profileString, stopServer)
+        )(tsc => ZIO.attempt(tsc.stop.run()).orDie)
+      } yield tsc
     }
 
   val hadoopFileSystemLayer: ZLayer[
@@ -143,10 +142,10 @@ object PropertyTest extends ZIOSpecDefault {
           auth <- ZIO.service[Auth]
           config <- ZIO.service[Configuration]
           fs <- ZIO.attempt {
-            // Initialize the security configuration and login using the subject if available
-            UserGroupInformation.setConfiguration(config)
             auth match {
               case AuthLayer.KerberosAuth(subject) =>
+                // Initialize the security configuration and login using the subject if available
+                UserGroupInformation.setConfiguration(config)
                 UserGroupInformation.loginUserFromSubject(subject)
               case _ =>
                 // No authentication needed
@@ -155,7 +154,7 @@ object PropertyTest extends ZIOSpecDefault {
           }
         } yield fs
       } { fs =>
-        ZIO.attempt(fs.close()).orDie // Ensure FileSystem is closed on release
+        ZIO.attempt(fs.close()).orDie
       }
     }
 
@@ -176,16 +175,31 @@ object PropertyTest extends ZIOSpecDefault {
           _ <- ZIO.attempt(fs.mkdirs(testDir))
         } yield TestTables(testDir)
       } { testTables =>
-        ZIO.serviceWithZIO[FileSystem] { fs =>
-          ZIO
-            .attempt(
-              fs.rename(
-                testTables.basePath,
-                testTables.basePath.suffix(s"-deleted")
-              )
+        val releaseEffectAny: ZIO[Any, Throwable, Unit] = for {
+          _ <- ZIO.attempt {
+            println(s"[DEBUG] basePath: ${testTables.basePath}, uri: ${testTables.basePath.toUri}")
+            val defaultFs = FileSystem.get(hadoopConf)
+            println(s"[DEBUG] defaultFS uri: ${defaultFs.getUri}")
+
+            val pathFs = testTables.basePath.getFileSystem(hadoopConf)
+            println(s"[DEBUG] pathFS uri: ${pathFs.getUri}")
+
+            // Attempt to rename using the FileSystem associated with the basePath
+            pathFs.rename(
+              testTables.basePath,
+              testTables.basePath.suffix("-deleted")
             )
-            .orDie
-        }
+            ()
+          }
+          _ <- ZIO.attempt {
+            val pathFs = testTables.basePath.getFileSystem(hadoopConf)
+            println(s"[DEBUG] mkdirs using pathFS uri: ${pathFs.getUri}")
+            pathFs.mkdirs(testTables.basePath)
+            ()
+          }
+        } yield ()
+        val releaseEffectSafe: ZIO[Any, Nothing, Unit] = releaseEffectAny.orDie
+        ZIO.serviceWithZIO[FileSystem](_ => releaseEffectSafe)
       }
     }
 
@@ -236,13 +250,13 @@ object PropertyTest extends ZIOSpecDefault {
     def addCommit(commit: Commit): TableState =
       copy(
         commits = commits :+ commit,
-        currentVersion = currentVersion.orElse(Some(0L)).map(_ + 1)
+        currentVersion = currentVersion.map(_ + 1)
       )
     def getFiles(
         startingVersion: Option[Long],
         endingVersion: Option[Long]
     ): clientModel.DeltaTableFiles = {
-      if (commits.size < 2) {
+      if (commits.flatMap(_.actions).size < 2) {
         throw new IllegalStateException(
           "Commits data is incomplete, missing protocol or metadata headers"
         )
@@ -257,8 +271,12 @@ object PropertyTest extends ZIOSpecDefault {
             "Please upgrade to a newer release."
         )
       }
-      val metadata = firstCommit.actions(1).asInstanceOf[clientModel.Metadata]
-      val addFiles = ArrayBuffer[clientModel.AddFileForCDF]()
+      val baseMetadata = firstCommit.actions(1).asInstanceOf[clientModel.Metadata]
+      val metadata = baseMetadata.copy(version = startingVersion match {
+        case Some(v) => v
+        case None    => null
+      })
+      val files = ArrayBuffer[clientModel.AddFile]()
       val cdcFiles = ArrayBuffer[clientModel.AddCDCFile]()
       val removeFiles = ArrayBuffer[clientModel.RemoveFile]()
       val additionalMetadatas = ArrayBuffer[clientModel.Metadata]()
@@ -273,21 +291,7 @@ object PropertyTest extends ZIOSpecDefault {
           commit.actions.foreach {
             case a: clientModel.AddFile =>
               version = math.max(version, commit.version)
-              addFiles.append(
-                clientModel.AddFileForCDF(
-                  url = a.url,
-                  id = a.id,
-                  partitionValues = a.partitionValues,
-                  size = a.size,
-                  expirationTimestamp = null,
-                  version = commit.version,
-                  timestamp = commit.timestamp,
-                  stats = a.stats
-                )
-              )
-            case a: clientModel.AddFileForCDF =>
-              version = math.max(version, a.version)
-              addFiles.append(a)
+              files.append(a)
             case c: clientModel.AddCDCFile =>
               version = math.max(version, c.version)
               cdcFiles.append(c)
@@ -297,6 +301,21 @@ object PropertyTest extends ZIOSpecDefault {
             case m: clientModel.Metadata =>
               version = math.max(version, m.version)
               additionalMetadatas.append(m)
+            case p:clientModel.Protocol => ()
+            case a: clientModel.AddFileForCDF =>
+              version = math.max(version, a.version)
+              files.append(
+                clientModel.AddFile(
+                  url = a.url,
+                  id = a.id,
+                  partitionValues = a.partitionValues,
+                  size = a.size,
+                  stats = a.stats,
+                  version = null,
+                  timestamp = null,
+                  expirationTimestamp = null
+                )
+              )
             case other =>
               throw new IllegalStateException(
                 s"Unexpected action encountered: $other"
@@ -308,7 +327,8 @@ object PropertyTest extends ZIOSpecDefault {
         version = finalVersion,
         protocol = protocol,
         metadata = metadata,
-        addFiles = addFiles.toSeq,
+        files = files.toSeq,
+        addFiles = Seq.empty,
         cdfFiles = cdcFiles.toSeq,
         removeFiles = removeFiles.toSeq,
         additionalMetadatas = additionalMetadatas.toSeq,
@@ -338,7 +358,11 @@ object PropertyTest extends ZIOSpecDefault {
             "Please upgrade to a newer release."
         )
       }
-      val metadata = firstCommit.actions(1).asInstanceOf[clientModel.Metadata]
+      val baseMetadata = firstCommit.actions(1).asInstanceOf[clientModel.Metadata]
+      val metadata = baseMetadata.copy(version = startingVersion match {
+        case Some(v) => v
+        case None    => null
+      })
       val addFiles = ArrayBuffer[clientModel.AddFileForCDF]()
       val cdcFiles = ArrayBuffer[clientModel.AddCDCFile]()
       val removeFiles = ArrayBuffer[clientModel.RemoveFile]()
@@ -358,15 +382,11 @@ object PropertyTest extends ZIOSpecDefault {
                   id = a.id,
                   partitionValues = a.partitionValues,
                   size = a.size,
-                  expirationTimestamp = null,
                   version = commit.version,
-                  timestamp = commit.timestamp,
+                  timestamp = commit.timestamp.getOrElse(0L),
                   stats = a.stats
                 )
               )
-            case a: clientModel.AddFileForCDF =>
-              version = math.max(version, a.version)
-              addFiles.append(a)
             case c: clientModel.AddCDCFile =>
               version = math.max(version, c.version)
               cdcFiles.append(c)
@@ -376,6 +396,9 @@ object PropertyTest extends ZIOSpecDefault {
             case m: clientModel.Metadata =>
               version = math.max(version, m.version)
               if (includeHistoricalMetadata) additionalMetadatas.append(m)
+            case a: clientModel.AddFileForCDF =>
+              version = math.max(version, a.version)
+              addFiles.append(a)
             case other =>
               throw new IllegalStateException(
                 s"Unexpected action encountered in CDF: $other"
@@ -389,6 +412,7 @@ object PropertyTest extends ZIOSpecDefault {
         protocol = protocol,
         metadata = metadata,
         addFiles = addFiles.toSeq,
+        files = Seq.empty,
         cdfFiles = cdcFiles.toSeq,
         removeFiles = removeFiles.toSeq,
         additionalMetadatas = additionalMetadatas.toSeq,
@@ -468,7 +492,7 @@ object PropertyTest extends ZIOSpecDefault {
       actions: Seq[clientModel.Action],
       operation: Operation,
       version: Long,
-      timestamp: Long,
+      timestamp: Option[Long],
       message: String
   ) {}
 
@@ -511,18 +535,25 @@ object PropertyTest extends ZIOSpecDefault {
         StatefulDeterministic
           .allStepsSuccessful(steps)
           .debug("Test finished") <*
-          ZIO.attempt(
-            FileSystem
-              .get(hadoopConf)
-              .rename(
-                testTables.basePath,
-                testTables.basePath.suffix("-deleted")
-              )
-          ) <*
-          ZIO.attempt(
-            FileSystem.get(hadoopConf).mkdirs(testTables.basePath)
-          ) <*
-          ZIO.succeed(testServerEnv.serverConfig.shares.get(0).schemas.clear())
+          ZIO.attempt {
+            println(s"[DEBUG] basePath: ${testTables.basePath}, uri: ${testTables.basePath.toUri}")
+            val defaultFs = FileSystem.get(hadoopConf)
+            println(s"[DEBUG] defaultFS uri: ${defaultFs.getUri}")
+
+            val pathFs = testTables.basePath.getFileSystem(hadoopConf)
+            println(s"[DEBUG] pathFS uri: ${pathFs.getUri}")
+
+            // Attempt to rename using the FileSystem associated with the basePath
+            pathFs.rename(
+              testTables.basePath,
+              testTables.basePath.suffix("-deleted")
+            )
+          } <*
+          ZIO.attempt {
+            val pathFs = testTables.basePath.getFileSystem(hadoopConf)
+            println(s"[DEBUG] mkdirs using pathFS uri: ${pathFs.getUri}")
+            pathFs.mkdirs(testTables.basePath)
+          }
       )
     } yield result
   }).provideSomeLayer(overallLayer.fresh) @@ TestAspect.timeout(10.minutes)

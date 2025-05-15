@@ -47,7 +47,7 @@ class ServerConfigSuite extends AnyFunSuite {
     val tempFile = Files.createTempFile("delta-sharing-server", ".yaml").toFile
     try {
       FileUtils.copyFile(
-        new File("src/universal/conf/delta-sharing-server.yaml.template"),
+        new File("server/src/universal/conf/delta-sharing-server.yaml.template"),
         tempFile)
       val loaded = ServerConfig.load(tempFile.getCanonicalPath)
       val sharesInTemplate = Arrays.asList(
@@ -190,7 +190,7 @@ class ServerConfigSuite extends AnyFunSuite {
     assertInvalidConfig("'name' in a schema must be provided") {
       new SchemaConfig().checkConfig()
     }
-    assertInvalidConfig("'name' in a table must be provided") {
+    assertInvalidConfig("'location' in a table must be provided") {
       val s = new SchemaConfig()
       s.setName("name")
       s.setTables(Arrays.asList(new TableConfig()))
@@ -199,10 +199,10 @@ class ServerConfigSuite extends AnyFunSuite {
   }
 
   test("TableConfig") {
-    assertInvalidConfig("'name' in a table must be provided") {
+    assertInvalidConfig("'location' in a table must be provided") {
       new TableConfig().checkConfig()
     }
-    assertInvalidConfig("'name' in a table must be provided") {
+    assertInvalidConfig("'name' in a table must be provided when 'discoveryEnabled' is false") {
       val t = new TableConfig()
       t.setLocation("Location")
       t.checkConfig()
@@ -210,6 +210,30 @@ class ServerConfigSuite extends AnyFunSuite {
     assertInvalidConfig("'location' in a table must be provided") {
       val t = new TableConfig()
       t.setName("name")
+      t.checkConfig()
+    }
+  }
+
+  test("TableConfig with discovery enabled") {
+    // Valid discovery config
+    val t1 = new TableConfig()
+    t1.setLocation("^s3://bucket/team-([^/]+)/table-([^/]+)")
+    t1.setName("team_${1}_${2}")
+    t1.checkConfig() // Should not throw
+
+    // Invalid: discovery enabled but no nameTemplate
+    assertInvalidConfig("'nameTemplate' must be provided when 'discoveryEnabled' is true") {
+      val t = new TableConfig()
+      t.setLocation("^s3://bucket/pattern")
+      t.checkConfig()
+    }
+
+    // Invalid: discovery enabled but name is also provided
+    assertInvalidConfig("'name' should not be provided when 'discoveryEnabled' is true") {
+      val t = new TableConfig()
+      t.setName("table-name")
+      t.setLocation("^s3://bucket/pattern")
+      t.setName("template")
       t.checkConfig()
     }
   }

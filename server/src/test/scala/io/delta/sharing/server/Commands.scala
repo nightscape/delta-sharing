@@ -40,7 +40,7 @@ object CreateManagedTableCommand {
         .elements("a", "b")
         .map(id => s"table-${id.toLowerCase}")
         .filterNot(state.tables.map(_.tableId).contains)
-      tablePath = s"$basePath/$schema/$tableName-${java.lang.System.currentTimeMillis()}"
+      tablePath = s"$basePath/$schema/$tableName"
     } yield new CreateManagedTableCommand(
       tablePath,
       schema,
@@ -67,12 +67,13 @@ case class CreateManagedTableCommand(
           name = tableName,
           description = null,
           schemaString = BaseTestResource.structType.toJson,
-          format = clientModel.Format(provider = "parquet")
+          format = clientModel.Format(provider = "parquet"),
+          version = 0L
         )
       ),
       operation = new Operation(Operation.Name.CREATE_TABLE),
       version = 0L,
-      timestamp = dummyTimestamp,
+      timestamp = Option(dummyTimestamp),
       message = "Created test table"
     )
     val tableState = TableState(
@@ -112,26 +113,6 @@ case class CreateManagedTableCommand(
           "Created test table"
         )
         println(s"Server created table at $tablePath")
-        val shareOpt =
-          serverConfig.shares.asScala.find(_.name == "test-share")
-        val share = shareOpt.getOrElse(
-          throw new Exception("Share 'test-share' not found in server config")
-        )
-        val schemaOpt = share.schemas.asScala.find(_.name == schemaName)
-        val schemaConfig = schemaOpt.getOrElse {
-          val newSchemaConfig =
-            SchemaConfig(schemaName, new java.util.ArrayList[TableConfig]())
-          share.schemas.add(newSchemaConfig)
-          newSchemaConfig
-        }
-        val newTableConfig = TableConfig(
-          name = tableName,
-          location = tablePath,
-          id = java.util.UUID.randomUUID().toString,
-          historyShared = true,
-          startVersion = 0L
-        )
-        schemaConfig.tables.add(newTableConfig)
       }
       .flatMap { _ =>
         val newState = update(state)
@@ -213,18 +194,20 @@ case class AddDataCommand(
       .getOrElse(0L)
     val newVersion = currentVersion + 1
     val ts = timestamp.getOrElse(0L)
-    val dummyAddFile = clientModel.AddFile(
+    val dummyAddFile = clientModel.AddFileForCDF(
       url = fileUrl.toString,
       id = "SOME_ID",
       partitionValues = Map.empty[String, String],
       size = 1L,
+      version = newVersion,
+      timestamp = ts,
       stats = null
     )
     val commit = Commit(
       actions = Seq(dummyAddFile),
       operation = new Operation(Operation.Name.MANUAL_UPDATE),
       version = newVersion,
-      timestamp = ts,
+      timestamp = Option(ts),
       message = s"Added data at $ts"
     )
     val schemaObj = state
@@ -304,7 +287,7 @@ case class AddDataCommand(
           ),
           operation = new Operation(Operation.Name.MANUAL_UPDATE),
           version = commitResult.getVersion,
-          timestamp = ts,
+          timestamp = Option(ts),
           message = s"Added data at $ts"
         )
         commit
@@ -315,12 +298,12 @@ case class AddDataCommand(
         val addedFileOnStorage =
           commit.actions.head.asInstanceOf[clientModel.AddFile]
         val dtf = tableOpt.get.getCDFFiles()
-        val expectedFile = dtf.addFiles.last
+        val expectedFile = dtf.addFiles.lastOption
 
         assertTrue(
-          tableOpt.isDefined && expectedFile.url == addedFileOnStorage.url &&
-            expectedFile.id == addedFileOnStorage.id &&
-            expectedFile.partitionValues == addedFileOnStorage.partitionValues
+          tableOpt.isDefined && expectedFile.isDefined && expectedFile.get.url == addedFileOnStorage.url &&
+            expectedFile.get.id == addedFileOnStorage.id &&
+            expectedFile.get.partitionValues == addedFileOnStorage.partitionValues
           // expectedFile.size == addedFileOnStorage.size &&
           // expectedFile.version == commit.version &&
           // expectedFile.timestamp == commit.timestamp
@@ -412,7 +395,7 @@ case class ReadTableCommand(
           )
         }
       val tableOpt = state.table(schema, table)
-      val memoryDeltaFiles = dummyNonComparableFields(
+      val memoryDeltaFiles = if (startingVersion.isDefined || endingVersion.isDefined) {
         tableOpt.get.getCDFFiles(
           startingVersion,
           endingVersion,
@@ -420,9 +403,10 @@ case class ReadTableCommand(
           endingTimestamp,
           includeHistoricalMetadata = false
         )
-      )
-      val apiDeltaFiles = dummyNonComparableFields(files)
-      val diff = deltaTableFilesDiffer.diff(memoryDeltaFiles, apiDeltaFiles)
+      } else {
+        tableOpt.get.getFiles(startingVersion, endingVersion)
+      }
+      val diff = deltaTableFilesDiffer.diff(memoryDeltaFiles, files)
       val diffString = DiffResultPrinter.consoleOutput(diff, 2).toString()
       if (!diff.isOk) println(diffString)
       assertTrue(
@@ -433,31 +417,6 @@ case class ReadTableCommand(
           )
       )
     }
-  }
-  private def dummyNonComparableFields(
-                                        deltaTableFiles: clientModel.DeltaTableFiles
-                                      ): clientModel.DeltaTableFiles = {
-    val dummyVersion = 0L
-    val dummyMetadataVersion: java.lang.Long = 0L
-    val dummyId = "dummy-id"
-    val dummyTimestamp = 0L
-    val dummyExpirationTimestamp: java.lang.Long = 0L
-    val newMetadata = if (deltaTableFiles.metadata != null) {
-      deltaTableFiles.metadata.copy(version = dummyMetadataVersion)
-    } else null
-    val newAddFiles = deltaTableFiles.addFiles.map { addFile =>
-      addFile.copy(
-        id = dummyId,
-        timestamp = dummyTimestamp,
-        expirationTimestamp = dummyExpirationTimestamp
-      )
-    }
-    deltaTableFiles.copy(
-      version = dummyVersion,
-      metadata = newMetadata,
-      addFiles = newAddFiles,
-      refreshToken = None
-    )
   }
 }
 

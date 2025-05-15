@@ -10,24 +10,34 @@ services:
       - source: server-config
         target: /server-config.yaml
   namenode:
-    image: gchq/hdfs:3.2
-    platform: linux/amd64
-    entrypoint: ["/bin/bash"]
-    command: ["-c", "/opt/hadoop/scripts/namenode-init.sh"]
+    build:
+      context: .
+      dockerfile: hadoop.dockerfile
+    user: hdfs
     tty: false
     cpus: 1
     mem_limit: 1G
     volumes:
       - ./configs/hadoop:/etc/hadoop/conf
       - ./scripts/hadoop:/opt/hadoop/scripts
-      - my-shared-volume:/etc/security/hadoop-truststores
+      - truststore-volume:/etc/security/hadoop-truststores
     tmpfs:
       - /opt/hadoop/hadoop_data:uid=1000,gid=1000,mode=770,size=10G
+    hostname: namenode.localtest.me
     env_file:
       - ./env-files/hadoop.env
       - ./env-files/hdfs.env
+    environment:
+      - EXTERNAL_HOSTNAME=namenode.localtest.me
+      - SSL_TRUSTSTORES_PATH=/etc/security/hadoop-truststores
+    command:
+      - /bin/bash
+      - --verbose
+      - -c
+      - |
+        ~/scripts/namenode-init.sh
     healthcheck:
-      test: ["CMD", "curl", "-k", "-f", "https://namenode:9871"]
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:9871"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -47,7 +57,7 @@ services:
     volumes:
       - ./configs/hadoop:/etc/hadoop/conf
       - ./scripts/hadoop:/opt/hadoop/scripts
-      - my-shared-volume:/etc/security/hadoop-truststores
+      - truststore-volume:/etc/security/hadoop-truststores
       - ./test_table:/opt/hadoop/hadoop_data/tmp/delta-test/delta-test-table
     tmpfs:
       - /opt/hadoop/hadoop_data:uid=1000,gid=1000,mode=770,size=10G
@@ -92,7 +102,7 @@ networks:
 
 volumes:
   # Shared volume to mount on every hadoop host to list trusted self signed certificates...
-  my-shared-volume:
+  truststore-volume:
     driver: local
     driver_opts:
       type: tmpfs

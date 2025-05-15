@@ -18,10 +18,11 @@ import sbt.ExclusionRule
 
 ThisBuild / parallelExecution := false
 
+// Resolved merge conflict: unified Spark and Scala version definitions
 val previousSparkVersion = "3.5.3"
 val latestSparkVersion = "4.0.0"
 val scala212 = "2.12.18"
-val scala213 = "2.13.13"
+val scala213 = "2.13.16"
 val scalaTestVersion = "3.2.15"
 
 def sparkVersionFor(scalaVer: String): String = scalaVer match {
@@ -181,6 +182,14 @@ lazy val spark = (project in file("spark")) dependsOn(client) settings(
 
 lazy val generateJibClasspathFile = taskKey[File]("Generate Jib Classpath File")
 
+val hadoopVersion = "3.4.1"
+
+// Common settings for server test configurations
+def serverTestSettings(exampleDir: String) = Seq(
+  Test / unmanagedResourceDirectories += baseDirectory.value / ".." / "examples" / exampleDir / "configs" / "hadoop",
+  Test / envVars += "SSL_TRUSTSTORES_PATH" -> (baseDirectory.value / ".." / "examples" / exampleDir / "truststore").getAbsolutePath
+)
+
 lazy val server = (project in file("server"))
   .enablePlugins(JavaAppPackaging)
   .dependsOn(client % "test->test")
@@ -277,7 +286,7 @@ lazy val server = (project in file("server"))
       ) ++ additionalExclusions): _*
     ),
     // Apply Hadoop exclusions to avoid duplicate classes
-    "org.apache.hadoop" % "hadoop-aws" % "3.3.4" excludeAll(
+    "org.apache.hadoop" % "hadoop-aws" % hadoopVersion excludeAll(
       (Seq(
         ExclusionRule("com.fasterxml.jackson.core"),
         ExclusionRule("com.fasterxml.jackson.module"),
@@ -289,7 +298,7 @@ lazy val server = (project in file("server"))
       additionalExclusions: _*
     ),
     // Apply Hadoop exclusions to avoid duplicate classes
-    "org.apache.hadoop" % "hadoop-azure" % "3.3.4" excludeAll(
+    "org.apache.hadoop" % "hadoop-azure" % hadoopVersion excludeAll(
       (Seq(
         ExclusionRule("com.fasterxml.jackson.core"),
         ExclusionRule("com.fasterxml.jackson.module"),
@@ -309,7 +318,7 @@ lazy val server = (project in file("server"))
       ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
     // Apply Hadoop exclusions to avoid duplicate classes
-    // "org.apache.hadoop" % "hadoop-common" % "3.3.4" excludeAll(
+    // "org.apache.hadoop" % "hadoop-common" % hadoopVersion excludeAll(
     //   (Seq(
     //     ExclusionRule("com.fasterxml.jackson.core"),
     //     ExclusionRule("com.fasterxml.jackson.module"),
@@ -317,7 +326,7 @@ lazy val server = (project in file("server"))
     //   ) ++ hadoopExclusions ++ additionalExclusions): _*
     // ),
     // Apply Hadoop exclusions to avoid duplicate classes
-    "org.apache.hadoop" % "hadoop-client" % "3.3.4" excludeAll(
+    "org.apache.hadoop" % "hadoop-client" % hadoopVersion excludeAll(
       (Seq(
         ExclusionRule("com.fasterxml.jackson.core"),
         ExclusionRule("com.fasterxml.jackson.module"),
@@ -370,9 +379,9 @@ lazy val server = (project in file("server"))
     "org.scalatest" %% "scalatest" % "3.2.19" % "test" excludeAll(additionalExclusions: _*),
     "dev.zio" %% "zio-test" % "2.1.14" % "test" excludeAll(additionalExclusions: _*),
     "dev.zio" %% "zio-test-sbt" % "2.1.14" % "test" excludeAll(additionalExclusions: _*),
-    "com.github.jatcwang" %% "difflicious-core" % "0.4.3" % "test" excludeAll(additionalExclusions: _*),,
+    "com.github.jatcwang" %% "difflicious-core" % "0.4.3" % "test" excludeAll(additionalExclusions: _*),
     "org.bouncycastle" % "bcprov-jdk15on" % "1.70" % "test",
-    "org.bouncycastle" % "bcpkix-jdk15on" % "1.70" % "test"
+    "org.bouncycastle" % "bcpkix-jdk15on" % "1.70" % "test",
     "com.github.sideeffffect" %% "zio-testcontainers" % "0.6.0" % "test" excludeAll(additionalExclusions: _*),
     "com.dimafeng" %% "testcontainers-scala-core" % "0.41.8" % "test" excludeAll(additionalExclusions: _*),
     "org.testcontainers" % "testcontainers" % "1.20.4" % "test" excludeAll(additionalExclusions: _*),
@@ -578,4 +587,4 @@ val findJarContainingClass = inputKey[Unit](
 )
 
 // In the root project settings:
-aggregate in findJarContainingClass := false
+findJarContainingClass / aggregate := false

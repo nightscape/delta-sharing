@@ -1,0 +1,42 @@
+---
+version: 1
+shares:
+- name: "example-share"
+  schemas:
+  - name: "example-schema"
+    tables:
+    # Static table configuration (existing functionality)
+    - name: "static-table"
+      location: "s3://my-bucket/static/delta-table"
+      id: "00000000-0000-0000-0000-000000000001"
+      historyShared: true
+      startVersion: 0
+
+    # Dynamic table discovery (new functionality)
+    - location: "^s3://data-lake/team-([^/]+)/table-([^/]+)/_delta_log$"
+      name: "team_$1_$2"
+      historyShared: true
+      startVersion: 0
+
+    # Another discovery pattern for different naming convention
+    - location: "s3://warehouse/([^/]+)/([^/]+)/delta/_delta_log"
+      nameTemplate: "${1}_${2}_daily"
+      discoveryEnabled: true
+      historyShared: false
+      startVersion: 0
+
+authorization:
+  bearerToken: "dapi5e3574ec767ca1548ae5bbed1a2dc04d"
+host: "localhost"
+port: 8000
+endpoint: "/delta-sharing"
+preSignedUrlTimeoutSeconds: 3600
+deltaTableCacheSize: 10
+stalenessAcceptable: false
+evaluatePredicateHints: true
+evaluateJsonPredicateHints: true
+evaluateJsonPredicateHintsV2: true
+requestTimeoutSeconds: 30
+queryTablePageSizeLimit: 10000
+queryTablePageTokenTtlMs: 259200000
+refreshTokenTtlMs: 3600000

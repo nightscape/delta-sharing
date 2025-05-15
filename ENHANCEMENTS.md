@@ -4,6 +4,16 @@ This fork introduces enhancements to the Delta Sharing server, focusing on enter
 
 ## Enhancements
 
+### Dynamic Table Discovery
+* Enables automatic discovery of Delta tables using glob patterns instead of requiring manual table configuration
+  * Scans file systems using configured glob patterns (e.g., `hdfs://namenode/data/*/tables/*`)
+  * Generates deterministic table IDs using SHA-256 hashing
+  * Supports dynamic table name expansion using regex capture groups
+  * Automatically detects `_delta_log` directories to identify valid Delta tables
+* Configuration example in [delta-sharing-server.yaml](./delta-sharing-server.yaml)
+* Files: [TableDiscoveryService.scala](./server/src/main/scala/io/delta/sharing/server/TableDiscoveryService.scala), [ServerConfig.scala](./server/src/main/scala/io/delta/sharing/server/config/ServerConfig.scala), [SharedTableManager.scala](./server/src/main/scala/io/delta/sharing/server/SharedTableManager.scala)
+- Tests: [TableDiscoveryServiceSuite.scala](./server/src/test/scala/io/delta/sharing/server/TableDiscoveryServiceSuite.scala), [TableDiscoveryIntegrationSuite.scala](./server/src/test/scala/io/delta/sharing/server/TableDiscoveryIntegrationSuite.scala)
+
 ### HDFS Delegation Token Support
 * Enables Delta Sharing server to work with Kerberized HDFS clusters
 * Docker Examples:

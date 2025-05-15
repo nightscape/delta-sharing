@@ -37,6 +37,8 @@ class SharedTableManager(serverConfig: ServerConfig) {
 
   private val defaultMaxResults = 500
 
+  private val tableDiscoveryService = new TableDiscoveryService(serverConfig)
+
   private def encodePageToken(id: String, share: Option[String], schema: Option[String]): String = {
     val binary = PageToken(id = Option(id), share = share, schema = schema).toByteArray
     new String(Base64.getUrlEncoder().encode(binary), UTF_8)
@@ -102,6 +104,15 @@ class SharedTableManager(serverConfig: ServerConfig) {
       .getOrElse(throw new DeltaSharingNoSuchElementException(s"schema '$schema' not found"))
   }
 
+  private def getAllTablesForSchema(schemaConfig: SchemaConfig): Seq[TableConfig] = {
+    val staticTables = schemaConfig.getTables.asScala.toSeq.filterNot(_.isDynamic)
+    val discoveredTables = schemaConfig.getTables.asScala.toSeq
+      .filter(_.isDynamic)
+      .flatMap(tableDiscoveryService.discoverTables)
+
+    staticTables ++ discoveredTables
+  }
+
   def listShares(
       nextPageToken: Option[String] = None,
       maxResults: Option[Int] = None): (Seq[Share], Option[String]) = {
@@ -136,9 +147,10 @@ class SharedTableManager(serverConfig: ServerConfig) {
       nextPageToken: Option[String] = None,
       maxResults: Option[Int] = None): (Seq[Table], Option[String]) = {
     val schemaConfig = getSchema(getShareInternal(share), schema)
-    getPage(nextPageToken, Some(share), Some(schema), maxResults, schemaConfig.getTables.size) {
+    val allTables = getAllTablesForSchema(schemaConfig)
+    getPage(nextPageToken, Some(share), Some(schema), maxResults, allTables.size) {
       (start, end) =>
-        schemaConfig.getTables.asScala.toSeq.map {
+        allTables.map {
           tableConfig =>
             Table(
               name = Some(tableConfig.getName),
@@ -155,20 +167,19 @@ class SharedTableManager(serverConfig: ServerConfig) {
       nextPageToken: Option[String] = None,
       maxResults: Option[Int] = None): (Seq[Table], Option[String]) = {
     val shareConfig = getShareInternal(share)
-    val totalSize = shareConfig.schemas.asScala.map(_.tables.size).sum
-    getPage(nextPageToken, Some(share), None, maxResults, totalSize) {
-      (start, end) =>
-        shareConfig.schemas.asScala.toSeq.flatMap { schema =>
-          schema.tables.asScala.toSeq.map {
-            table =>
-              Table(
-                name = Some(table.getName),
-                schema = Some(schema.name),
-                share = Some(share),
-                id = if (table.id.isEmpty) None else Some(table.id)
-              )
-          }
-        }.slice(start, end)
+    val allTables = shareConfig.schemas.asScala.toSeq.flatMap { schema =>
+      getAllTablesForSchema(schema).map { table =>
+        Table(
+          name = Some(table.getName),
+          schema = Some(schema.name),
+          share = Some(share),
+          id = if (table.id.isEmpty) None else Some(table.id)
+        )
+      }
+    }
+
+    getPage(nextPageToken, Some(share), None, maxResults, allTables.size) {
+      (start, end) => allTables.slice(start, end)
     }
   }
 
@@ -182,7 +193,9 @@ class SharedTableManager(serverConfig: ServerConfig) {
             s"[Share/Schema/Table] '$share/$schema/$table' does not exist, " +
               s"please contact your share provider for further information.")
       }
-    schemaConfig.getTables.asScala.find(t => caseInsensitiveComparer(t.getName, table))
+
+    val allTables = getAllTablesForSchema(schemaConfig)
+    allTables.find(t => caseInsensitiveComparer(t.getName, table))
       .getOrElse(throw new DeltaSharingNoSuchElementException(
         s"[Share/Schema/Table] '$share/$schema/$table' does not exist, " +
           s"please contact your share provider for further information."))

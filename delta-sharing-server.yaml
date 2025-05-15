@@ -1,0 +1,38 @@
+# The format version of this config file
+version: 1
+# Config shares/schemas/tables to share
+shares:
+- name: "share1"
+  schemas:
+  - name: "schema1"
+    tables:
+    - name: "table1"
+      location: "file:///tmp/delta-test/delta-test-table"
+      id: "00000000-0000-0000-0000-000000000000"
+      historyShared: true
+# Set the host name that the server will use
+host: "localhost"
+# Set the port that the server will listen on. Note: using ports below 1024
+# may require a privileged user in some operating systems.
+port: 8085
+# Set the url prefix for the REST APIs
+endpoint: "/delta-sharing"
+# Set the timeout of S3 presigned url in seconds
+preSignedUrlTimeoutSeconds: 3600
+# How many tables to cache in the server
+deltaTableCacheSize: 10
+# Whether we can accept working with a stale version of the table. This is useful when sharing
+# static tables that will never be changed.
+stalenessAcceptable: false
+# Whether to evaluate user provided `predicateHints`
+evaluatePredicateHints: false
+# Whether to evaluate user provided `jsonPredicateHints`
+evaluateJsonPredicateHints: true
+# Whether to evaluate user provided `jsonPredicateHints` for V2 predicates.
+evaluateJsonPredicateHintsV2: true
+# The maximum page size permitted by queryTable/queryTableChanges API.
+queryTablePageSizeLimit: 10000
+# The TTL of the page token generated in queryTable/queryTableChanges API (in milliseconds).
+queryTablePageTokenTtlMs: 259200000
+# The TTL of the refresh token generated in queryTable API (in milliseconds).
+refreshTokenTtlMs: 3600000
