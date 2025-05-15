@@ -19,15 +19,19 @@ object Differs {
   implicit val metadataDiffer: Differ[clientModel.Metadata] =
     Differ.derived[clientModel.Metadata].ignoreAt(_.id).ignoreAt(_.name) // TODO: Fix name
   implicit val addFileDiffer: Differ[clientModel.AddFile] =
-    Differ.derived[clientModel.AddFile].ignoreAt(_.size)
+    Differ.derived[clientModel.AddFile].ignoreAt(_.size).ignoreAt(_.id).ignoreAt(_.stats).ignoreAt(_.expirationTimestamp)
   implicit val addFileForCdfDiffer: Differ[clientModel.AddFileForCDF] =
-    Differ.derived[clientModel.AddFileForCDF].ignoreAt(_.size).ignoreAt(_.stats) // TODO: Fix stats
+    Differ.derived[clientModel.AddFileForCDF].ignoreAt(_.id).ignoreAt(_.size).ignoreAt(_.stats).ignoreAt(_.timestamp).ignoreAt(_.expirationTimestamp) // TODO: Fix stats
   implicit val addCdcFileDiffer: Differ[clientModel.AddCDCFile] =
     Differ.derived[clientModel.AddCDCFile].ignoreAt(_.size)
+  implicit val addFileSeqDiffer: Differ[Seq[clientModel.AddFile]] =
+    Differ.seqDiffer[Seq, clientModel.AddFile].pairBy(_.url)
+  implicit val addFileForCDFSeqDiffer: Differ[Seq[clientModel.AddFileForCDF]] =
+    Differ.seqDiffer[Seq, clientModel.AddFileForCDF].pairBy(_.url)
   implicit val addCdcFileSeqDiffer: Differ[Seq[clientModel.AddCDCFile]] =
     Differ.seqDiffer[Seq, clientModel.AddCDCFile].pairBy(_.url)
   implicit val removeFileDiffer: Differ[clientModel.RemoveFile] =
     Differ.derived[clientModel.RemoveFile].ignoreAt(_.url)
   implicit val deltaTableFilesDiffer: Differ[clientModel.DeltaTableFiles] =
-    Differ.derived[clientModel.DeltaTableFiles]
+    Differ.derived[clientModel.DeltaTableFiles].ignoreAt(_.version).ignoreAt(_.refreshToken).ignoreAt(_.additionalMetadatas)
 }

@@ -201,7 +201,7 @@ class DeltaSharingCDCReader(val deltaLog: DeltaLogImpl, val conf: Configuration)
       throw DeltaCDFErrors.changeDataNotRecordedException(start, start, end)
     }
 
-    val changes = deltaLog.getChanges(start, false).asScala.takeWhile(_.getVersion <= end)
+    val changes = deltaLog.getChanges(start, false).asScala.takeWhile(_.getVersion <= end).toList
 
     // Correct timestamp values are only available through
     // DeltaHistoryManager.getTimestampsByVersion

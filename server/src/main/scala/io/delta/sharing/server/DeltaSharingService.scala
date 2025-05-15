@@ -674,22 +674,6 @@ object DeltaSharingService {
   }
 
   private def updateDefaultJsonPrinterForScalaPbConverterUtil(): Unit = {
-    val module = Class.forName("com.linecorp.armeria.server.scalapb.ScalaPbConverterUtil$")
-      .getDeclaredField("MODULE$").get(null)
-    val defaultJsonPrinterField =
-      Class.forName("com.linecorp.armeria.server.scalapb.ScalaPbConverterUtil$")
-        .getDeclaredField("defaultJsonPrinter")
-
-    // Remove the final modifier
-    val modifiersField = classOf[Field].getDeclaredField("modifiers")
-    modifiersField.setAccessible(true)
-    modifiersField.setInt(
-      defaultJsonPrinterField,
-      defaultJsonPrinterField.getModifiers & ~Modifier.FINAL
-    )
-
-    defaultJsonPrinterField.setAccessible(true)
-    defaultJsonPrinterField.set(module, new Printer())
   }
 
   def start(serverConfig: ServerConfig): Server = {

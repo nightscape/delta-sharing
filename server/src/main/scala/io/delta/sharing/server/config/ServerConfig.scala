@@ -235,18 +235,30 @@ case class TableConfig(
     @BeanProperty var location: String,
     @BeanProperty var id: String = "",
     @BeanProperty var historyShared: Boolean = false,
-    @BeanProperty var startVersion: Long = 0) extends ConfigItem {
+    @BeanProperty var startVersion: Long = 0,
+) extends ConfigItem {
 
   def this() {
     this(null, null, null)
   }
 
   override def checkConfig(): Unit = {
-    if (name == null) {
-      throw new IllegalArgumentException("'name' in a table must be provided")
-    }
     if (location == null) {
       throw new IllegalArgumentException("'location' in a table must be provided")
     }
+
+    if (isDynamic) {
+      if (!"\\$\\d+".r.unanchored.matches(name)) {
+        throw new IllegalArgumentException(
+          "'name' must contain $1, $2, etc. placeholders when 'location' is a glob")
+      }
+    } else {
+      if (name == null) {
+        throw new IllegalArgumentException(
+          "'name' in a table must be provided when 'discoveryEnabled' is false")
+      }
+    }
   }
+
+  def isDynamic: Boolean = location.contains("*")
 }
