@@ -22,31 +22,49 @@ import java.lang.management.ManagementFactory
 import org.apache.commons.io.FileUtils
 
 import io.delta.sharing.server.config.ServerConfig
+import java.util.function.IntConsumer
+import org.apache.hadoop.security.GroupMappingServiceProvider
+import org.apache.hadoop.security.JniBasedUnixGroupsMappingWithFallback
+import _root_.com.linecorp.armeria.server.Server
 
 /**
  * This is a special test class for the client projects to test end-to-end experience. It will
  * generate configs for testing and start the server.
  */
-object TestDeltaSharingServer {
+object TestDeltaSharingServer extends TestServer {
   def main(args: Array[String]): Unit = {
+    start(args(0), (port: Int) => {
+      println(s"Server is running on port $port")
+    })
+  }
+  def start(pidFileName: String, portCallback: IntConsumer): Unit = {
     val pid = ManagementFactory.getRuntimeMXBean().getName().split("@")(0)
-    val pidFile = new File(args(0))
+    val pidFile = new File(pidFileName)
     // scalastyle:off println
     println(s"Writing pid $pid to $pidFile")
     // scalastyle:off on
     FileUtils.writeStringToFile(pidFile, pid)
-    if (sys.env.get("AWS_ACCESS_KEY_ID").exists(_.length > 0)) {
-      val serverConfigPath = TestResource.setupTestTables().getCanonicalPath
-      val serverConfig = ServerConfig.load(serverConfigPath)
-      println("serverConfigPath=" + serverConfigPath)
-      println("serverConfig=" + serverConfig)
-      val server = DeltaSharingService.start(serverConfig)
+    if (true || sys.env.get("AWS_ACCESS_KEY_ID").exists(_.length > 0)) {
+      val serverConfigPath = LocalDeltaTestResource.setupTestTables().getCanonicalPath
+      val stopServer = startWithConfig(serverConfigPath)
       // Run at most 420 seconds and exit. This is to ensure we can exit even if the parent process
       // hits any error.
       Thread.sleep(420000)
-      server.stop()
+      stopServer.run()
     } else {
       throw new IllegalArgumentException("Cannot find AWS_ACCESS_KEY_ID in sys.env")
     }
+  }
+  def startWithConfig(serverConfigPath: String): Runnable = {
+    val serverConfig = ServerConfig.load(serverConfigPath)
+    println("serverConfigPath=" + serverConfigPath)
+    println("serverConfig=" + serverConfig)
+    val server = DeltaSharingService.start(serverConfig)
+    val stopServer = new Runnable {
+      def run(): Unit = {
+        server.stop()
+      }
+    }
+    stopServer
   }
 }

@@ -14,19 +14,17 @@
  * limitations under the License.
  */
 
-package io.delta.sharing.server
+package io.delta.standalone
 
+import io.delta.standalone.internal.util.Clock
+import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
-import org.scalatest.funsuite.AnyFunSuite
 
-import io.delta.sharing.server.common.GCSFileSigner
-
-class CloudFileSignerSuite extends AnyFunSuite {
-
-  test("GCSFileSigner.getBucketAndObjectNames") {
-    assert(GCSFileSigner.getBucketAndObjectNames(new Path("gs://delta-sharing-test/foo"))
-      == ("delta-sharing-test", "foo"))
-    assert(GCSFileSigner.getBucketAndObjectNames(new Path("gs://delta_sharing_test/foo"))
-      == ("delta_sharing_test", "foo"))
+package object internal {
+  def deltaLogForTableWithClock(hadoopConf: Configuration, path: String, clock: Clock): DeltaLog = {
+    DeltaLogImpl.forTable(hadoopConf, path, clock = clock)
+  }
+  def deltaLogForTableWithClock(hadoopConf: Configuration, path: Path, clock: Clock): DeltaLog = {
+    DeltaLogImpl.forTable(hadoopConf, path, clock = clock)
   }
 }

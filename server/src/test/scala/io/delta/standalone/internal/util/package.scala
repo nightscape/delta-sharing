@@ -14,19 +14,8 @@
  * limitations under the License.
  */
 
-package io.delta.sharing.server
+package io.delta.standalone.internal
 
-import org.apache.hadoop.fs.Path
-import org.scalatest.funsuite.AnyFunSuite
-
-import io.delta.sharing.server.common.GCSFileSigner
-
-class CloudFileSignerSuite extends AnyFunSuite {
-
-  test("GCSFileSigner.getBucketAndObjectNames") {
-    assert(GCSFileSigner.getBucketAndObjectNames(new Path("gs://delta-sharing-test/foo"))
-      == ("delta-sharing-test", "foo"))
-    assert(GCSFileSigner.getBucketAndObjectNames(new Path("gs://delta_sharing_test/foo"))
-      == ("delta_sharing_test", "foo"))
-  }
+package object util {
+  def newManualClock: ManualClock = new ManualClock()
 }

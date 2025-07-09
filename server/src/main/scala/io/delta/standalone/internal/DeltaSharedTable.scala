@@ -22,6 +22,8 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.util.Base64
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ListBuffer
+import scala.util.control.NonFatal
 
 import com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem
 import com.google.common.hash.Hashing
@@ -31,17 +33,15 @@ import io.delta.standalone.internal.exception.DeltaErrors
 import io.delta.standalone.internal.util.ConversionUtils
 import org.apache.commons.codec.digest.DigestUtils
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.{LocalFileSystem, Path}
 import org.apache.hadoop.fs.azure.NativeAzureFileSystem
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem
 import org.apache.hadoop.fs.s3a.S3AFileSystem
 import org.apache.spark.sql.types.{DataType, MetadataBuilder, StructType}
-import scala.collection.mutable.ListBuffer
-import scala.util.control.NonFatal
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
 
 import io.delta.sharing.server.{model, DeltaSharedTableProtocol, DeltaSharingIllegalArgumentException, DeltaSharingUnsupportedOperationException, ErrorStrings, QueryResult}
-import io.delta.sharing.server.common.{AbfsFileSigner, GCSFileSigner, JsonUtils, PreSignedUrl, S3FileSigner, WasbFileSigner}
+import io.delta.sharing.server.common.{AbfsFileSigner, GCSFileSigner, JsonUtils, LocalFileSigner, PreSignedUrl, S3FileSigner, WasbFileSigner}
 import io.delta.sharing.server.config.TableConfig
 import io.delta.sharing.server.protocol.{QueryTablePageToken, RefreshToken}
 
@@ -104,6 +104,8 @@ class DeltaSharedTable(
         AbfsFileSigner(abfs, deltaLog.dataPath.toUri, preSignedUrlTimeoutSeconds)
       case gc: GoogleHadoopFileSystem =>
         new GCSFileSigner(deltaLog.dataPath.toUri, conf, preSignedUrlTimeoutSeconds)
+      case _: LocalFileSystem =>
+        new LocalFileSigner(deltaLog.dataPath.toUri, conf, preSignedUrlTimeoutSeconds)
       case _ =>
         throw new IllegalStateException(s"File system ${fs.getClass} is not supported")
     }
@@ -825,7 +827,7 @@ class DeltaSharedTable(
     QueryResult(start, actions.toSeq, responseFormat)
   }
 
-  def update(): Unit = withClassLoader {
+  override def update(): Unit = withClassLoader {
     deltaLog.update()
   }
 

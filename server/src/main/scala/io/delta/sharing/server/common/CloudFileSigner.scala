@@ -243,3 +243,31 @@ object GCSFileSigner {
     (resourceId.getBucketName, resourceId.getObjectName)
   }
 }
+
+class LocalFileSigner(
+    name: URI,
+    conf: Configuration,
+    preSignedUrlTimeoutSeconds: Long) extends CloudFileSigner {
+  private def addDelegationToken(url: String, fs: FileSystem): String = scala.util.Try {
+    val delegationTokens = fs.addDelegationTokens("renewer", null)
+    val tokenParam = delegationTokens.head.encodeToUrlString()
+    val separator = if (url.contains("?")) "&" else "?"
+    s"${url}${separator}delegation=${tokenParam}"
+  }.recover {
+    case e: Exception =>
+      // println(s"Failed to add delegation token to $url", e)
+      url
+  }.get
+  override def sign(path: Path): PreSignedUrl = {
+    val absolutePath = path.toUri
+    assert(absolutePath.getPath.nonEmpty, s"cannot get path from $path")
+    val tokenString = delegationToken
+      .headOption
+      .map(token => s"?delegation=${token.encodeToUrlString()}")
+      .getOrElse("")
+    PreSignedUrl(
+      absolutePath.toString,
+      System.currentTimeMillis() + SECONDS.toMillis(preSignedUrlTimeoutSeconds)
+    )
+  }
+}

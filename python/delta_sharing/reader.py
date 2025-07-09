@@ -26,6 +26,7 @@ import pandas as pd
 import pyarrow as pa
 import tempfile
 from pyarrow.dataset import dataset
+from pyarrow.parquet import ParquetFile
 
 from delta_sharing.converter import to_converters, get_empty_table
 from delta_sharing.protocol import AddCdcFile, CdfOptions, FileAction, Table
@@ -45,6 +46,7 @@ class DeltaSharingReader:
         version: Optional[int] = None,
         timestamp: Optional[str] = None,
         use_delta_format: Optional[bool] = None,
+        convert_in_batches: bool = False,
     ):
         self._table = table
         self._rest_client = rest_client
@@ -61,6 +63,7 @@ class DeltaSharingReader:
         self._version = version
         self._timestamp = timestamp
         self._use_delta_format = use_delta_format
+        self._convert_in_batches = convert_in_batches
 
     @property
     def table(self) -> Table:
@@ -130,8 +133,13 @@ class DeltaSharingReader:
             schema = scan.execute(interface).schema
             return pd.DataFrame(columns=schema.names)
 
-        table = pa.Table.from_batches(scan.execute(interface))
-        result = table.to_pandas()
+        batches = scan.execute(interface)
+        if self._convert_in_batches:
+            pdfs = [batch.to_pandas(self_destruct=True) for batch in batches]
+            print(f"Received {len(pdfs)} batches of data.")
+            result = pd.concat(pdfs, axis=0, ignore_index=True, copy=False)
+        else:
+            result = pa.Table.from_batches(batches).to_pandas(self_destruct=True)
 
         # Apply residual limit that was not handled from server pushdown
         result = result.head(self._limit)
@@ -174,14 +182,18 @@ class DeltaSharingReader:
 
         if self._limit is None:
             pdfs = [
-                DeltaSharingReader._to_pandas(file, converters, False, None)
+                DeltaSharingReader._to_pandas(
+                    file, converters, False, None, self._convert_in_batches
+                )
                 for file in response.add_files
             ]
         else:
             left = self._limit
             pdfs = []
             for file in response.add_files:
-                pdf = DeltaSharingReader._to_pandas(file, converters, False, left)
+                pdf = DeltaSharingReader._to_pandas(
+                    file, converters, False, left, self._convert_in_batches
+                )
                 pdfs.append(pdf)
                 left -= len(pdf)
                 assert (
@@ -361,12 +373,15 @@ class DeltaSharingReader:
                 table, interface, min_version, max_version
             ).build()
 
+            scan_result = scan.execute(interface)
             if num_versions_with_action == 0:
-                schema = scan.execute(interface).schema
+                schema = scan_result.schema
                 result = pd.DataFrame(columns=schema.names)
+            elif self._convert_in_batches:
+                pdfs = [batch.to_pandas(self_destruct=True) for batch in scan_result]
+                result = pd.concat(pdfs, axis=0, ignore_index=True, copy=False)
             else:
-                table = pa.Table.from_batches(scan.execute(interface))
-                result = table.to_pandas()
+                result = pa.Table.from_batches(scan_result).to_pandas(self_destruct=True)
         finally:
             # Delete the temp folder explicitly and remove the delta format from header
             temp_dir.cleanup()
@@ -389,7 +404,9 @@ class DeltaSharingReader:
         converters = to_converters(schema_json)
         pdfs = []
         for action in response.actions:
-            pdf = DeltaSharingReader._to_pandas(action, converters, True, None)
+            pdf = DeltaSharingReader._to_pandas(
+                action, converters, True, None, self._convert_in_batches
+            )
             pdfs.append(pdf)
 
         return pd.concat(pdfs, axis=0, ignore_index=True, copy=False)
@@ -418,6 +435,7 @@ class DeltaSharingReader:
         converters: Dict[str, Callable[[str], Any]],
         for_cdf: bool,
         limit: Optional[int],
+        convert_in_batches: bool,
     ) -> pd.DataFrame:
         url = urlparse(action.url)
         if "storage.googleapis.com" in (url.netloc.lower()):
@@ -431,11 +449,34 @@ class DeltaSharingReader:
         else:
             filesystem = fsspec.filesystem(protocol)
 
-        pa_dataset = dataset(source=action.url, format="parquet", filesystem=filesystem)
-        pa_table = pa_dataset.head(limit) if limit is not None else pa_dataset.to_table()
-        pdf = pa_table.to_pandas(
-            date_as_object=True, use_threads=False, split_blocks=True, self_destruct=True
-        )
+        pa_file = ParquetFile(action.url, filesystem=filesystem)
+
+        if convert_in_batches:
+            pdfs = []
+            rows_read = 0
+            for batch in pa_file.iter_batches():
+                rows_read += len(batch)
+                pdfs.append(
+                    batch.to_pandas(
+                        date_as_object=True,
+                        use_threads=False,
+                        split_blocks=False,
+                        self_destruct=True,
+                    )
+                )
+                if limit is not None and rows_read >= limit:
+                    break
+
+            print(f"Received {len(pdfs)} batches of data.")
+            pdf = pd.concat(pdfs, axis=0, ignore_index=True, copy=False)
+            if limit is not None:
+                pdf = pdf.head(limit)
+        else:
+            pa_dataset = dataset(source=action.url, format="parquet", filesystem=filesystem)
+            pa_table = pa_dataset.head(limit) if limit is not None else pa_dataset.to_table()
+            pdf = pa_table.to_pandas(
+                date_as_object=True, use_threads=False, split_blocks=False, self_destruct=True
+            )
 
         lowered_cols = set()
         for col in pdf.columns:
