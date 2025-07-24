@@ -32,11 +32,6 @@ import AuthLayer.Auth
 
 object PropertyTest extends ZIOSpecDefault {
   private val format = "delta"
-  private lazy val spark =
-    SparkSession.builder().master("local[4]").getOrCreate()
-
-  // Create the Hadoop configuration. Notice that later we update it to point to the HDFS cluster.
-  def hadoopConf: Configuration = spark.sparkContext.hadoopConfiguration
 
   def findFreePort(): Task[Int] = {
     val socket = new ServerSocket(0)
@@ -60,7 +55,7 @@ object PropertyTest extends ZIOSpecDefault {
   )
   final case class TestTables(basePath: Path)
   val serverConfigLayer
-      : ZLayer[Scope with TestTables, Throwable, DeltaServerEnvironment] =
+      : ZLayer[Scope with TestTables with Configuration, Throwable, DeltaServerEnvironment] =
     ZLayer.scoped {
       for {
         port <- findFreePort()
@@ -72,6 +67,7 @@ object PropertyTest extends ZIOSpecDefault {
              |  "bearerToken": "$token"
              |}""".stripMargin
         testTables <- ZIO.service[TestTables]
+        hadoopConfiguration <- ZIO.service[Configuration]
         basePath = testTables.basePath
         serverConfig = ServerConfig(
           version = 1,
@@ -218,6 +214,7 @@ object PropertyTest extends ZIOSpecDefault {
       with Auth
       with Configuration
       with FileSystem
+      with SparkSession
   ] =
     ZLayer.make[
         Scope
@@ -228,11 +225,13 @@ object PropertyTest extends ZIOSpecDefault {
         with Auth
         with Configuration
         with FileSystem
+        with SparkSession
     ](
       Scope.default,
       DockerLayer.live(stackDescriptor),
       AuthLayer.live(stackDescriptor),
       HadoopConfLayer.live(stackDescriptor),
+      SparkSessionLayer.live,
       testTablesLayer,
       serverConfigLayer,
       serverLayer,
@@ -501,15 +500,12 @@ object PropertyTest extends ZIOSpecDefault {
     "DeltaSharingOperations"
   )(test("delta sharing operations") {
     for {
-      // TODO: The deletion of old directories still leaves caches in the server intact
-      _ <- ZIO.succeed(spark)
+      spark <- ZIO.service[SparkSession]
       testTables <- ZIO.service[TestTables]
       testServerEnv <- ZIO.service[DeltaServerEnvironment]
       testServer <- ZIO.service[TestServerConfig]
+      fs <- ZIO.service[FileSystem]
       profilePath <- ZIO.attempt {
-        val fs = testTables.basePath.getFileSystem(
-          spark.sparkContext.hadoopConfiguration
-        )
         val profilePath = testTables.basePath.suffix("/delta-test.share")
         val outputStream = fs.create(profilePath)
         outputStream.writeBytes(testServer.profileString)
@@ -517,12 +513,14 @@ object PropertyTest extends ZIOSpecDefault {
         profilePath
       }
       client = DeltaSharingRestClient(profilePath.toString)
+      hadoopConf = spark.sparkContext.hadoopConfiguration
       commandsGen = { state: DeltaState =>
         List(
           CreateManagedTableCommand.gen(
             testTables.basePath,
             state,
-            testServerEnv.serverConfig
+            testServerEnv.serverConfig,
+            hadoopConf
           ),
           AddDataCommand.gen(spark, state),
           ReadTableCommand.gen(client, state),
@@ -537,22 +535,17 @@ object PropertyTest extends ZIOSpecDefault {
           .debug("Test finished") <*
           ZIO.attempt {
             println(s"[DEBUG] basePath: ${testTables.basePath}, uri: ${testTables.basePath.toUri}")
-            val defaultFs = FileSystem.get(hadoopConf)
-            println(s"[DEBUG] defaultFS uri: ${defaultFs.getUri}")
+            println(s"[DEBUG] FileSystem uri: ${fs.getUri}")
 
-            val pathFs = testTables.basePath.getFileSystem(hadoopConf)
-            println(s"[DEBUG] pathFS uri: ${pathFs.getUri}")
-
-            // Attempt to rename using the FileSystem associated with the basePath
-            pathFs.rename(
+            // Attempt to rename using the FileSystem
+            fs.rename(
               testTables.basePath,
               testTables.basePath.suffix("-deleted")
             )
           } <*
           ZIO.attempt {
-            val pathFs = testTables.basePath.getFileSystem(hadoopConf)
-            println(s"[DEBUG] mkdirs using pathFS uri: ${pathFs.getUri}")
-            pathFs.mkdirs(testTables.basePath)
+            println(s"[DEBUG] mkdirs using FileSystem uri: ${fs.getUri}")
+            fs.mkdirs(testTables.basePath)
           }
       )
     } yield result
