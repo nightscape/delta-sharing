@@ -50,4 +50,4 @@ This fork introduces enhancements to the Delta Sharing server, focusing on enter
   * Init scripts for namenode/datanode
   * Spark data import scripts
   * Delta Sharing server configuration
-* Files: [DockerLayer.scala](./server/src/test/scala/io/delta/sharing/server/DockerLayer.scala), [HadoopConfLayer.scala](./server/src/test/scala/io/delta/sharing/server/HadoopConfLayer.scala), [AuthLayer.scala](./server/src/test/scala/io/delta/sharing/server/AuthLayer.scala)
+* Files: [DockerLayer.scala](./server/src/test/scala/io/delta/sharing/server/DockerLayer.scala), [SparkSessionLayer.scala](./server/src/test/scala/io/delta/sharing/server/SparkSessionLayer.scala), [HadoopConfLayer.scala](./server/src/test/scala/io/delta/sharing/server/HadoopConfLayer.scala), [AuthLayer.scala](./server/src/test/scala/io/delta/sharing/server/AuthLayer.scala)

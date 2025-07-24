@@ -5,7 +5,7 @@ import io.delta.sharing.client.model.Table
 import io.delta.sharing.client.{DeltaSharingClient, model => clientModel}
 import io.delta.sharing.server.Differs._
 import io.delta.sharing.server.Implicits._
-import io.delta.sharing.server.PropertyTest.{Commit, DeltaState, TableState, TestSchema, hadoopConf}
+import io.delta.sharing.server.PropertyTest.{Commit, DeltaState, TableState, TestSchema}
 import io.delta.sharing.server.config.{SchemaConfig, ServerConfig, TableConfig}
 import io.delta.standalone.Operation
 import io.delta.standalone.actions.{AddFile, Metadata, Protocol}
@@ -16,7 +16,7 @@ import org.apache.hadoop.fs.{Path, RemoteIterator}
 import org.apache.spark.sql.{Row, SaveMode, SparkSession}
 import org.apache.spark.sql.types.{DataType => SparkDataType, StructType => SparkStructType}
 import scala.collection.JavaConverters._
-import zio.{Clock, ZIO}
+import zio.{Clock, ZIO, Trace}
 import zio.test.{Gen, TestResult, assertTrue}
 
 import java.util.concurrent.TimeUnit
@@ -32,7 +32,8 @@ object CreateManagedTableCommand {
   def gen(
            basePath: Path,
            state: DeltaState,
-           serverConfig: ServerConfig
+           serverConfig: ServerConfig,
+           hadoopConf: org.apache.hadoop.conf.Configuration
          ): Gen[Any, StatefulDeterministic.Command[Any, DeltaState]] =
     for {
       schema <- Gen.const("test-schema")
@@ -45,7 +46,8 @@ object CreateManagedTableCommand {
       tablePath,
       schema,
       tableName,
-      serverConfig
+      serverConfig,
+      hadoopConf
     )
 }
 
@@ -53,7 +55,8 @@ case class CreateManagedTableCommand(
                                       tablePath: String,
                                       schemaName: String,
                                       tableName: String,
-                                      serverConfig: ServerConfig
+                                      serverConfig: ServerConfig,
+                                      hadoopConf: org.apache.hadoop.conf.Configuration
                                     ) extends StatefulDeterministic.Command[Any, DeltaState] {
   type E = Throwable
 
@@ -142,7 +145,8 @@ object AddDataCommand {
       Table(table.tableId, schema, "test-share"),
       table.tablePath.toString,
       data,
-      timestamp
+      timestamp,
+      spark.sparkContext.hadoopConfiguration
     )
 
 
@@ -179,7 +183,8 @@ case class AddDataCommand(
                            table: Table,
                            tablePath: String,
                            data: List[Row],
-                           timestamp: Option[Long]
+                           timestamp: Option[Long],
+                           hadoopConf: org.apache.hadoop.conf.Configuration
                          ) extends StatefulDeterministic.Command[Any, DeltaState] {
   type E = Throwable
   private val fileName: String =
