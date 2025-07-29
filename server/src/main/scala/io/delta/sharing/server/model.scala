@@ -18,7 +18,7 @@ package io.delta.sharing.server.model
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
-import org.codehaus.jackson.annotate.JsonRawValue
+import com.fasterxml.jackson.annotation.JsonRawValue
 
 import io.delta.sharing.server.common.actions.{DeltaFormat, DeltaMetadata, DeltaProtocol, DeltaSingleAction}
 
