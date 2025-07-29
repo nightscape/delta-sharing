@@ -16,7 +16,7 @@
 
 package io.delta.sharing.client.model
 
-import com.fasterxml.jackson.annotation.{JsonInclude, JsonRawValue}
+import com.fasterxml.jackson.annotation.JsonInclude
 import org.apache.spark.sql.types.{DataType, LongType, StringType}
 
 // Information about CDF columns.
@@ -156,7 +156,6 @@ private[sharing] case class AddFile(
     @JsonInclude(JsonInclude.Include.ALWAYS)
     override val partitionValues: Map[String, String],
     override val size: Long,
-    @JsonRawValue
     stats: String = null,
     version: java.lang.Long = null,
     timestamp: java.lang.Long = null,
@@ -173,7 +172,6 @@ private[sharing] case class AddFileForCDF(
     override val size: Long,
     version: Long,
     timestamp: Long,
-    @JsonRawValue
     stats: String = null,
     expirationTimestamp: java.lang.Long = null) extends FileAction(url, id, partitionValues, size) {
 

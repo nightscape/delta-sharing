@@ -18,7 +18,6 @@ package io.delta.sharing.server.model
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
-import org.codehaus.jackson.annotate.JsonRawValue
 
 import io.delta.sharing.server.common.actions.{DeltaFormat, DeltaMetadata, DeltaProtocol, DeltaSingleAction}
 
@@ -91,7 +90,6 @@ case class AddFile(
     @JsonInclude(JsonInclude.Include.ALWAYS)
     partitionValues: Map[String, String],
     size: Long,
-    @JsonRawValue
     stats: String = null,
     expirationTimestamp: java.lang.Long = null,
     timestamp: java.lang.Long = null,
@@ -111,7 +109,6 @@ case class AddFileForCDF(
     expirationTimestamp: java.lang.Long = null,
     version: Long,
     timestamp: Long,
-    @JsonRawValue
     stats: String = null) extends Action {
 
   override def wrap: SingleAction = SingleAction(add = this)

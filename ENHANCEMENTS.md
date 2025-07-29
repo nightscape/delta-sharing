@@ -56,3 +56,9 @@ This fork introduces enhancements to the Delta Sharing server, focusing on enter
   * Spark data import scripts
   * Delta Sharing server configuration
 * Files: [DockerLayer.scala](./server/src/test/scala/io/delta/sharing/server/DockerLayer.scala), [SparkSessionLayer.scala](./server/src/test/scala/io/delta/sharing/server/SparkSessionLayer.scala), [HadoopConfLayer.scala](./server/src/test/scala/io/delta/sharing/server/HadoopConfLayer.scala), [AuthLayer.scala](./server/src/test/scala/io/delta/sharing/server/AuthLayer.scala)
+
+## Bug Fixes
+
+### Stats Field Format
+* Corrected stats field serialization - should be a plain string, not a nested JSON object
+* Files: [model.scala](./server/src/main/scala/io/delta/sharing/server/model.scala)
