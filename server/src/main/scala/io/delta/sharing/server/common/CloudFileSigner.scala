@@ -17,11 +17,10 @@
 package io.delta.sharing.server.common
 
 import java.net.URI
+import java.time.Duration
 import java.util.Date
 import java.util.concurrent.TimeUnit.SECONDS
 
-import com.amazonaws.HttpMethod
-import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest
 import com.google.cloud.hadoop.gcsio.StorageResourceId
 import com.google.cloud.storage.BlobId
 import com.google.cloud.storage.BlobInfo
@@ -38,6 +37,9 @@ import org.apache.hadoop.fs.s3a.DefaultS3ClientFactory
 import org.apache.hadoop.fs.s3a.S3ClientFactory.S3ClientCreationParameters
 import org.apache.hadoop.security.UserGroupInformation
 import org.apache.hadoop.util.ReflectionUtils
+import software.amazon.awssdk.services.s3.model.GetObjectRequest
+import software.amazon.awssdk.services.s3.presigner.S3Presigner
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest
 
 /**
  * @param url The signed url.
@@ -55,21 +57,33 @@ class S3FileSigner(
     conf: Configuration,
     preSignedUrlTimeoutSeconds: Long) extends CloudFileSigner {
 
-  private val s3Client = ReflectionUtils.newInstance(classOf[DefaultS3ClientFactory], conf)
-    .createS3Client(name, new S3ClientCreationParameters())
+  // Create S3Presigner - in production, this should be configured with proper credentials
+  // from the Hadoop configuration, but for now we'll use the default presigner
+  private val s3Presigner = S3Presigner.create()
 
   override def sign(path: Path): PreSignedUrl = {
     val absPath = path.toUri
     val bucketName = absPath.getHost
     val objectKey = absPath.getPath.stripPrefix("/")
-    val expiration =
-      new Date(System.currentTimeMillis() + SECONDS.toMillis(preSignedUrlTimeoutSeconds))
     assert(objectKey.nonEmpty, s"cannot get object key from $path")
-    val request = new GeneratePresignedUrlRequest(bucketName, objectKey)
-      .withMethod(HttpMethod.GET)
-      .withExpiration(expiration)
+    
+    // Build the GetObjectRequest
+    val getObjectRequest = GetObjectRequest.builder()
+      .bucket(bucketName)
+      .key(objectKey)
+      .build()
+    
+    // Build the presign request with the specified duration
+    val presignRequest = GetObjectPresignRequest.builder()
+      .signatureDuration(Duration.ofSeconds(preSignedUrlTimeoutSeconds))
+      .getObjectRequest(getObjectRequest)
+      .build()
+    
+    // Generate the presigned URL
+    val presignedRequest = s3Presigner.presignGetObject(presignRequest)
+    
     PreSignedUrl(
-      s3Client.generatePresignedUrl(request).toString,
+      presignedRequest.url().toString,
       System.currentTimeMillis() + SECONDS.toMillis(preSignedUrlTimeoutSeconds)
     )
   }

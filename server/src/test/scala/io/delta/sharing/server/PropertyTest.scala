@@ -523,7 +523,7 @@ object PropertyTest extends ZIOSpecDefault {
       }
       client = DeltaSharingRestClient(profilePath.toString)
       hadoopConf = spark.sparkContext.hadoopConfiguration
-      commandsGen = { state: DeltaState =>
+      commandsGen = { (state: DeltaState) =>
         List(
           CreateManagedTableCommand.gen(
             testTables.basePath,

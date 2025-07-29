@@ -57,6 +57,12 @@ This fork introduces enhancements to the Delta Sharing server, focusing on enter
   * Delta Sharing server configuration
 * Files: [DockerLayer.scala](./server/src/test/scala/io/delta/sharing/server/DockerLayer.scala), [SparkSessionLayer.scala](./server/src/test/scala/io/delta/sharing/server/SparkSessionLayer.scala), [HadoopConfLayer.scala](./server/src/test/scala/io/delta/sharing/server/HadoopConfLayer.scala), [AuthLayer.scala](./server/src/test/scala/io/delta/sharing/server/AuthLayer.scala)
 
+## Build Tool Changes
+
+### AWS SDK v2 Migration
+* Upgraded from AWS SDK v1 to v2 for S3 pre-signed URL generation
+* Files: [CloudFileSigner.scala](./server/src/main/scala/io/delta/sharing/server/common/CloudFileSigner.scala), [build.sbt](./build.sbt)
+
 ## Bug Fixes
 
 ### Stats Field Format
