@@ -297,6 +297,14 @@ lazy val server = (project in file("server"))
     "com.amazonaws" % "aws-java-sdk-bundle" % "1.12.189" excludeAll(
       additionalExclusions: _*
     ),
+    // AWS SDK v2 dependencies
+    "software.amazon.awssdk" % "bom" % "2.28.17" pomOnly(),
+    "software.amazon.awssdk" % "s3" % "2.28.17" excludeAll(
+      additionalExclusions: _*
+    ),
+    "software.amazon.awssdk" % "url-connection-client" % "2.28.17" excludeAll(
+      additionalExclusions: _*
+    ),
     // Apply Hadoop exclusions to avoid duplicate classes
     "org.apache.hadoop" % "hadoop-azure" % hadoopVersion excludeAll(
       (Seq(

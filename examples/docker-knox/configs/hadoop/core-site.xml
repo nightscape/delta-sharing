@@ -19,7 +19,7 @@
 
   <property>
     <name>hadoop.security.authentication</name>
-    <value>kerberos</value>
+    <value>simple</value>
     <description>Possible values are simple (no authentication), and kerberos
     </description>
   </property>
@@ -80,6 +80,10 @@
   </property>
 
   <property>
+    <name>fs.defaultFS</name>
+    <value>knoxswebhdfs://knox-gateway.localtest.me:8443</value>
+  </property>
+  <property>
     <name>fs.knoxwebhdfs.impl</name>
     <value>org.apache.hadoop.hdfs.web.KnoxWebHdfsFileSystem</value>
   </property>
@@ -110,5 +114,22 @@
   <property>
     <name>fs.knoxswebhdfs.https.enabled</name>
     <value>true</value>
+  </property>
+
+  <!-- Knox WebHDFS authentication and connection settings -->
+  <property>
+    <name>knox.webhdfs.username</name>
+    <value>hadoop</value>
+    <description>Username for Knox WebHDFS authentication</description>
+  </property>
+  <property>
+    <name>knox.webhdfs.password</name>
+    <value>hadoop-password</value>
+    <description>Password for Knox WebHDFS authentication</description>
+  </property>
+  <property>
+    <name>knox.webhdfs.verify.hostname</name>
+    <value>false</value>
+    <description>Disable hostname verification for testing with localtest.me</description>
   </property>
 </configuration>

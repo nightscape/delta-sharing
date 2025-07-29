@@ -50,8 +50,8 @@ object HadoopConfLayer {
             Thread.currentThread().getContextClassLoader()
           )
           Thread.currentThread().setContextClassLoader(customLoader)
-          //java.lang.System.setProperty("HADOOP_CONF_DIR", hadoopConfDir.toString)
-          //java.lang.System.setProperty("hadoop.conf.dir", hadoopConfDir.toString)
+          java.lang.System.setProperty("HADOOP_CONF_DIR", hadoopConfDir.toString)
+          java.lang.System.setProperty("hadoop.conf.dir", hadoopConfDir.toString)
         }
 
         // Create and configure a new Hadoop Configuration
@@ -66,7 +66,7 @@ object HadoopConfLayer {
           } else {
             s"hdfs://${endpoints.namenodeHost}:${endpoints.namenodePort}"
           }
-          conf.set("fs.defaultFS", defaultFsUri)
+          //conf.set("fs.defaultFS", defaultFsUri)
 
           // For Kerberos setups, ensure correct principal names with the container name
           if (desc.needsKerberosLogin) {

@@ -147,6 +147,10 @@ object server extends SbtModule with CommonModule with ScalaPBModule with Docker
     ivy"org.apache.hadoop:hadoop-aws:$hadoopVersion",
     ivy"org.apache.hadoop:hadoop-azure:$hadoopVersion",
     ivy"com.amazonaws:aws-java-sdk-bundle:1.12.189",
+    // AWS SDK v2 dependencies
+    ivy"software.amazon.awssdk:bom:2.28.17",
+    ivy"software.amazon.awssdk:s3:2.28.17",
+    ivy"software.amazon.awssdk:url-connection-client:2.28.17",
     ivy"com.google.cloud:google-cloud-storage:2.2.2",
     ivy"com.google.cloud.bigdataoss:gcs-connector:hadoop2-2.2.4",
     ivy"org.apache.parquet:parquet-hadoop:$parquetVersion",
