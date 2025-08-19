@@ -59,6 +59,10 @@ This fork introduces enhancements to the Delta Sharing server, focusing on enter
 
 ## Build Tool Changes
 
+### SBT Server Assembly
+* Assembly JAR for server deployment
+* Files: [build.sbt](./build.sbt)
+
 ### AWS SDK v2 Migration
 * Upgraded from AWS SDK v1 to v2 for S3 pre-signed URL generation
 * Files: [CloudFileSigner.scala](./server/src/main/scala/io/delta/sharing/server/common/CloudFileSigner.scala), [build.sbt](./build.sbt)

@@ -18,6 +18,13 @@ import sbt.ExclusionRule
 
 ThisBuild / parallelExecution := false
 
+ThisBuild / dependencyOverrides ++= Seq(
+  "com.thesamet.scalapb" %% "scalapb-json4s" % "0.12.2",
+  "org.json4s" %% "json4s-jackson-core" % json4sVersion,
+  "org.json4s" %% "json4s-ast" % json4sVersion,
+  "org.json4s" %% "json4s-core" % json4sVersion
+)
+
 // Resolved merge conflict: unified Spark and Scala version definitions
 val previousSparkVersion = "3.5.3"
 val latestSparkVersion = "4.0.0"
@@ -190,6 +197,8 @@ def serverTestSettings(exampleDir: String) = Seq(
   Test / envVars += "SSL_TRUSTSTORES_PATH" -> (baseDirectory.value / ".." / "examples" / exampleDir / "truststore").getAbsolutePath
 )
 
+val json4sVersion = "4.0.7"
+
 lazy val server = (project in file("server"))
   .enablePlugins(JavaAppPackaging)
   .dependsOn(client % "test->test")
@@ -216,6 +225,14 @@ lazy val server = (project in file("server"))
     case "log4j.properties" => MergeStrategy.concat
     case "git.properties" => MergeStrategy.concat
     case "overview.html" => MergeStrategy.discard
+    // Handle specific file conflicts
+    case "mozilla/public-suffix-list.txt" => MergeStrategy.first
+    case "VersionInfo.java" => MergeStrategy.first
+    case "mapred-default.xml" => MergeStrategy.first
+    case "core-default.xml" => MergeStrategy.first
+    case "yarn-default.xml" => MergeStrategy.first
+    case "common-version-info.properties" => MergeStrategy.first
+    case "yarn-version-info.properties" => MergeStrategy.first
     // Handle Hadoop duplicate classes
     case PathList("org", "apache", "hadoop", xs @ _*) => MergeStrategy.first
     case PathList("org", "apache", "spark", xs @ _*) => MergeStrategy.first
@@ -230,6 +247,11 @@ lazy val server = (project in file("server"))
     // Handle Jersey conflicts
     case PathList("com", "sun", "research", "ws", "wadl", xs @ _*) => MergeStrategy.first
     case PathList("jersey", "repackaged", xs @ _*) => MergeStrategy.first
+    // Handle AWS SDK conflicts
+    case PathList("software", "amazon", "awssdk", xs @ _*) => MergeStrategy.first
+    case PathList("com", "amazonaws", xs @ _*) => MergeStrategy.first
+    // Handle Apache HTTP components conflicts
+    case PathList("org", "apache", "http", xs @ _*) => MergeStrategy.first
     // Other common conflicts
     case PathList("com", "google", xs @ _*) => MergeStrategy.first
     case PathList("com", "esotericsoftware", xs @ _*) => MergeStrategy.first
@@ -265,7 +287,11 @@ lazy val server = (project in file("server"))
     "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2",
     "com.fasterxml.jackson.dataformat" % "jackson-dataformat-yaml" % "2.15.2",
     "dev.mauch" % "knox-webhdfs" % "0.0.6",
-    "org.json4s" %% "json4s-jackson" % "3.7.0-M11" excludeAll(
+    "org.json4s" %% "json4s-core" % json4sVersion,
+    "org.json4s" %% "json4s-jackson" % json4sVersion,
+    "org.json4s" %% "json4s-ast" % json4sVersion,
+    "com.thesamet.scalapb" %% "scalapb-json4s" % "0.12.2",
+    "org.json4s" %% "json4s-jackson" % json4sVersion excludeAll(
       (Seq(
         ExclusionRule("com.fasterxml.jackson.core"),
         ExclusionRule("com.fasterxml.jackson.module")
@@ -291,15 +317,27 @@ lazy val server = (project in file("server"))
         ExclusionRule("com.fasterxml.jackson.core"),
         ExclusionRule("com.fasterxml.jackson.module"),
         ExclusionRule("com.google.guava", "guava"),
-        ExclusionRule("com.amazonaws", "aws-java-sdk-bundle")
+        ExclusionRule("com.amazonaws", "aws-java-sdk-bundle"),
+        ExclusionRule("com.amazonaws", "aws-java-sdk-core"),
+        ExclusionRule("com.amazonaws", "aws-java-sdk-s3"),
+        ExclusionRule("software.amazon.awssdk", "bundle")
       ) ++ hadoopExclusions ++ additionalExclusions): _*
     ),
-    "com.amazonaws" % "aws-java-sdk-bundle" % "1.12.189" excludeAll(
-      additionalExclusions: _*
-    ),
-    // AWS SDK v2 dependencies
+    // AWS SDK v2 dependencies (replacing v1 bundle to avoid conflicts)
     "software.amazon.awssdk" % "bom" % "2.28.17" pomOnly(),
     "software.amazon.awssdk" % "s3" % "2.28.17" excludeAll(
+      additionalExclusions: _*
+    ),
+    "software.amazon.awssdk" % "sdk-core" % "2.28.17" excludeAll(
+      additionalExclusions: _*
+    ),
+    "software.amazon.awssdk" % "auth" % "2.28.17" excludeAll(
+      additionalExclusions: _*
+    ),
+    "software.amazon.awssdk" % "regions" % "2.28.17" excludeAll(
+      additionalExclusions: _*
+    ),
+    "software.amazon.awssdk" % "utils" % "2.28.17" excludeAll(
       additionalExclusions: _*
     ),
     "software.amazon.awssdk" % "url-connection-client" % "2.28.17" excludeAll(
