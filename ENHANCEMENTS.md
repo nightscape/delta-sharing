@@ -34,6 +34,15 @@ This fork introduces enhancements to the Delta Sharing server, focusing on enter
 * When data files need to be accessed through Knox or another gateway with URL rewriting
 * Files: [ServerConfig.scala](./server/src/main/scala/io/delta/sharing/server/config/ServerConfig.scala), [DeltaSharedTableKernel.scala](./server/src/main/scala/io/delta/sharing/kernel/internal/DeltaSharedTableKernel.scala)
 
+### HTTPS FileSystem with Seek Support
+* Custom Hadoop FileSystem implementation for HTTPS URLs that supports seeking operations
+* Required for reading Parquet footer metadata from remote HTTPS locations
+* Implementation
+  * Uses `RandomAccessHttpInputStream` for byte-range requests
+  * Configurable retry logic and timeouts
+  * Proxy support
+* Files: [DeltaSharingHttpsFileSystem.scala](./client/src/main/scala/io/delta/sharing/client/DeltaSharingHttpsFileSystem.scala)
+
 ## Testing Infrastructure
 
 ### Property-Based Testing Framework
