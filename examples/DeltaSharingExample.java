@@ -179,6 +179,9 @@ public class DeltaSharingExample {
      */
     private static void readParquetFileDirectly(String fileUrl, Configuration conf) throws Exception {
         try {
+            // Set up authentication in Hadoop configuration
+            setupHadoopAuthentication(conf);
+            
             // Create a Hadoop Path from the URL
             org.apache.hadoop.fs.Path path = new org.apache.hadoop.fs.Path(fileUrl);
 
@@ -236,6 +239,37 @@ public class DeltaSharingExample {
     }
 
     /**
+     * Sets up authentication for Hadoop configuration.
+     * This configures Knox WebHDFS authentication using tokens or basic auth.
+     *
+     * @param conf The Hadoop configuration to set up
+     */
+    private static void setupHadoopAuthentication(Configuration conf) {
+        String jwtToken = System.getProperty("delta.sharing.jwt.token");
+        String passcodeToken = System.getProperty("delta.sharing.passcode.token");
+        String username = System.getProperty("delta.sharing.username");
+        String password = System.getProperty("delta.sharing.password");
+
+        if (jwtToken != null) {
+            // For Knox WebHDFS with JWT token, we need to set up the token in the configuration
+            // Knox WebHDFS typically expects tokens in specific properties
+            conf.set("hadoop.security.authentication.use.delegation.token", "true");
+            conf.set("knox.webhdfs.auth.token", jwtToken);
+            System.err.println("Added JWT token to Hadoop configuration");
+        } else if (passcodeToken != null) {
+            // Use passcode token as username with dummy password
+            conf.set("knox.webhdfs.username", passcodeToken);
+            conf.set("knox.webhdfs.password", "dummy");
+            System.err.println("Added Passcode token to Hadoop configuration");
+        } else if (username != null && password != null) {
+            // Traditional Basic Authentication
+            conf.set("knox.webhdfs.username", username);
+            conf.set("knox.webhdfs.password", password);
+            System.err.println("Added Basic Authentication to Hadoop configuration for user: " + username);
+        }
+    }
+
+    /**
      * Downloads a file from a URL to a local file path.
      *
      * @param urlString The URL to download from
@@ -247,10 +281,24 @@ public class DeltaSharingExample {
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("GET");
 
-        // Set up Basic Authentication if username and password are provided
+        // Set up authentication - check for tokens first, then fall back to basic auth
+        String jwtToken = System.getProperty("delta.sharing.jwt.token");
+        String passcodeToken = System.getProperty("delta.sharing.passcode.token");
         String username = System.getProperty("delta.sharing.username");
         String password = System.getProperty("delta.sharing.password");
-        if (username != null && password != null) {
+
+        if (jwtToken != null) {
+            // JWT Bearer token authentication
+            connection.setRequestProperty("Authorization", "Bearer " + jwtToken);
+            System.err.println("Added JWT Bearer Authentication");
+        } else if (passcodeToken != null) {
+            // Passcode token as username with dummy password
+            String auth = passcodeToken + ":dummy";
+            String encodedAuth = java.util.Base64.getEncoder().encodeToString(auth.getBytes("UTF-8"));
+            connection.setRequestProperty("Authorization", "Basic " + encodedAuth);
+            System.err.println("Added Passcode Token Authentication");
+        } else if (username != null && password != null) {
+            // Traditional Basic Authentication
             String auth = username + ":" + password;
             String encodedAuth = java.util.Base64.getEncoder().encodeToString(auth.getBytes("UTF-8"));
             connection.setRequestProperty("Authorization", "Basic " + encodedAuth);

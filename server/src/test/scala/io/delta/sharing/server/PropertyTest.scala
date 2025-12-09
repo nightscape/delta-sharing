@@ -521,23 +521,22 @@ object PropertyTest extends ZIOSpecDefault {
         outputStream.close()
         profilePath
       }
-      client = DeltaSharingRestClient(profilePath.toString)
+      client = DeltaSharingRestClient(profilePath.toString, Map.empty[String, String])
       hadoopConf = spark.sparkContext.hadoopConfiguration
-      commandsGen = { (state: DeltaState) =>
-        List(
-          CreateManagedTableCommand.gen(
-            testTables.basePath,
-            state,
-            testServerEnv.serverConfig,
-            hadoopConf
-          ),
-          AddDataCommand.gen(spark, state),
-          ReadTableCommand.gen(client, state),
-          ReadTableSparkCommand.gen(spark, profilePath.toString, state),
-        )
-      }
       result <- checkN(10)(
-        StatefulDeterministic.genActions(DeltaState.empty, commandsGen)
+        StatefulDeterministic.genActions[Any, DeltaState](DeltaState.empty, { (state: DeltaState) =>
+          List(
+            CreateManagedTableCommand.gen(
+              testTables.basePath,
+              state,
+              testServerEnv.serverConfig,
+              hadoopConf
+            ),
+            AddDataCommand.gen(spark, state),
+            ReadTableCommand.gen(client, state),
+            ReadTableSparkCommand.gen(spark, profilePath.toString, state),
+          )
+        })
       )(steps =>
         StatefulDeterministic
           .allStepsSuccessful(steps)
